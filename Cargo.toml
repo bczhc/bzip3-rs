@@ -1,8 +1,17 @@
 [package]
 name = "libbzip3-sys"
+authors = ["bczhc <bczhc0@126.com>"]
 version = "0.1.0"
 edition = "2021"
 build = "build.rs"
+license = "MIT/Apache-2.0"
+readme = "README.md"
+description = "FFI bindings to libbzip3"
+repository = "https://github.com/bczhc/bzip3-rs"
+homepage = "https://github.com/bczhc/bzip3-rs"
+documentation = "https://github.com/bczhc/bzip3-rs"
+keywords = ["compression", "decompression", "encoding", "ffi"]
+categories = ["compression", "api-bindings", "external-ffi-bindings"]
 
 [dependencies]
 
