@@ -133,8 +133,10 @@ where
         }
 
         unsafe {
-            buf.as_mut_ptr()
-                .copy_from(self.buffer.as_ptr() as *const u8, required_length);
+            buf.as_mut_ptr().copy_from(
+                self.buffer[self.buffer_pos..].as_ptr() as *const u8,
+                required_length,
+            );
         }
         self.buffer_pos += required_length;
         Ok(required_length)
