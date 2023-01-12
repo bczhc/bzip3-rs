@@ -1,7 +1,7 @@
 extern crate bindgen;
 
 use std::env;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const DEFAULT_LIB_DIR: &str = "/usr/lib";
 const DEFAULT_INCLUDE_DIR: &str = "/usr/include";
@@ -10,7 +10,7 @@ fn main() {
     let mut bzip3_lib_dir = String::from(DEFAULT_LIB_DIR);
     let mut bzip3_include_dir = String::from(DEFAULT_INCLUDE_DIR);
 
-    let bindings_output = Path::new("src/bindings.rs");
+    let bindings_output = PathBuf::from(env::var("OUT_DIR").unwrap()).join("bindings.rs");
 
     if let Ok(d) = env::var("BZIP3_LIB_DIR") {
         bzip3_lib_dir = d;
