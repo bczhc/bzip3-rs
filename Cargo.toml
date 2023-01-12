@@ -1,0 +1,18 @@
+[package]
+name = "bzip3"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+members = ["libbzip3-sys"]
+
+[dependencies]
+thiserror = "1.0.38"
+byteorder = "1.4.3"
+bytesize = "1.1.0"
+libbzip3-sys = { path = "libbzip3-sys" }
+
+[dev-dependencies]
+# examples/
+clap = "4.0.32"
+anyhow = "1.0.68"
