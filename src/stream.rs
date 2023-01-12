@@ -3,7 +3,7 @@
 //!
 //! TODO: handle panics
 
-use crate::{check_block_size, MAGIC_NUMBER};
+use crate::{check_block_size, TryReadExact, MAGIC_NUMBER};
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use bytesize::ByteSize;
 use libbzip3_sys::*;
@@ -30,7 +30,7 @@ where
         let mut buffer = vec![MaybeUninit::<u8>::uninit(); buffer_size];
         let buffer = slice::from_raw_parts_mut(buffer.as_mut_ptr() as *mut u8, buffer_size);
         loop {
-            let read_len = reader.read(buffer)?;
+            let read_len = reader.try_read_exact(buffer)?;
             if read_len == 0 {
                 break;
             }

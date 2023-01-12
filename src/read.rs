@@ -10,7 +10,7 @@ use byteorder::{WriteBytesExt, LE};
 use libbzip3_sys::{bz3_encode_block, bz3_free, bz3_new, bz3_state, bz3_strerror};
 
 use crate::errors::*;
-use crate::{check_block_size, MAGIC_NUMBER};
+use crate::{check_block_size, TryReadExact, MAGIC_NUMBER};
 
 pub struct Bz3Encoder<'a, R>
 where
@@ -74,7 +74,7 @@ where
             // skip 8 bytes to write the buffer first
             let buffer_buffer = &mut buffer[8..];
 
-            let read_size = self.reader.read(buffer_buffer)?;
+            let read_size = self.reader.try_read_exact(buffer_buffer)?;
 
             let new_size =
                 bz3_encode_block(self.state, buffer_buffer.as_mut_ptr(), read_size as i32);
