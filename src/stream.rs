@@ -3,7 +3,7 @@
 //!
 //! TODO: handle panics
 
-use crate::MAGIC_NUMBER;
+use crate::{check_block_size, MAGIC_NUMBER};
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use bytesize::ByteSize;
 use libbzip3_sys::*;
@@ -63,7 +63,7 @@ where
         panic!("Invalid signature");
     }
     let block_size = reader.read_u32::<LE>()? as usize;
-    if block_size < ByteSize::kib(65).0 as usize || block_size > ByteSize::mib(511).0 as usize {
+    if check_block_size(block_size).is_err() {
         panic!(
             "Invalid file. Reason: invalid block size: {}",
             ByteSize(block_size as u64).to_string_as(true)
