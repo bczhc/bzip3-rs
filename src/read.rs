@@ -3,11 +3,13 @@
 use std::ffi::CStr;
 use std::io::{Cursor, ErrorKind, Read, Write};
 use std::mem::MaybeUninit;
-use std::{io, slice};
+use std::{io, mem, slice};
 
-use byteorder::{WriteBytesExt, LE};
+use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 
-use libbzip3_sys::{bz3_encode_block, bz3_free, bz3_new, bz3_state, bz3_strerror};
+use libbzip3_sys::{
+    bz3_decode_block, bz3_encode_block, bz3_free, bz3_new, bz3_state, bz3_strerror,
+};
 
 use crate::errors::*;
 use crate::{check_block_size, TryReadExact, MAGIC_NUMBER};
@@ -157,20 +159,111 @@ where
     }
 }
 
-/*pub struct Bz3Decoder<'a, R>
+pub struct Bz3Decoder<'a, R>
 where
     R: Read,
 {
     state: *mut bz3_state,
     reader: &'a mut R,
+    /// The temporary buffer for [`Read::read`]
+    buffer: Vec<MaybeUninit<u8>>,
+    buffer_pos: usize,
+    buffer_len: usize,
+    block_size: i32,
 }
 
 impl<'a, R> Bz3Decoder<'a, R>
 where
     R: Read,
 {
-    fn new(reader: &mut R) {
-        todo!()
+    /// Create a BZIP3 decoder.
+    ///
+    /// # Errors
+    ///
+    /// When creating, this function reads the bzip3 header
+    /// from `reader`, and checks it. Error types are
+    /// [`io::Error`] and [`Error::InvalidSignature`].
+    pub fn new(reader: &'a mut R) -> Result<Self> {
+        let mut signature = [0_u8; MAGIC_NUMBER.len()];
+        let result = reader.read_exact(&mut signature);
+        if let Err(e) = result {
+            if e.kind() != ErrorKind::UnexpectedEof {
+                return Err(e.into());
+            }
+        }
+        if &signature != MAGIC_NUMBER {
+            return Err(Error::InvalidSignature);
+        }
+
+        let block_size = reader.read_i32::<LE>()?;
+        let state = create_bz3_state(block_size);
+
+        let buffer_size = block_size as usize + block_size as usize / 50 + 32;
+        let buffer = init_buffer(buffer_size);
+
+        Ok(Self {
+            state,
+            reader,
+            buffer_pos: 0,
+            buffer_len: 0,
+            buffer,
+            block_size,
+        })
+    }
+
+    /// The block size of the BZip3 stream.
+    pub fn block_size(&self) -> i32 {
+        self.block_size
+    }
+
+    /// Decompress and fill the buffer.
+    ///
+    /// Returns the original data size. Zero indicates a normal EOF.
+    ///
+    /// # Errors:
+    ///
+    /// Types: [`Error::ProcessBlock`], [`io::Error`]
+    fn decompress_block(&mut self) -> Result<i32> {
+        // Handle the block head. If there's no data to read, it reaches EOF of the bzip3 stream.
+        let mut new_size_buf = [0_u8; 4];
+        let len = self.reader.try_read_exact(&mut new_size_buf)?;
+        let new_size = match len {
+            0 => {
+                // a normal EOF
+                return Ok(0);
+            }
+            4 => {
+                use byteorder::ByteOrder;
+                LE::read_i32(&new_size_buf)
+            }
+            _ => {
+                // corrupt stream
+                return Err(Error::Io(io::Error::new(
+                    ErrorKind::UnexpectedEof,
+                    "Corrupt file; insufficient block head info",
+                )));
+            }
+        };
+        let read_size = self.reader.read_i32::<LE>()?;
+
+        debug_assert!(self.buffer.len() >= read_size as usize);
+
+        let buffer = unsafe { transmute_uninitialized_buffer(&mut self.buffer) };
+        self.reader.read_exact(&mut buffer[..(new_size as usize)])?;
+
+        unsafe {
+            let result = bz3_decode_block(self.state, buffer.as_mut_ptr(), new_size, read_size);
+            if result == -1 {
+                return Err(Error::ProcessBlock(
+                    CStr::from_ptr(bz3_strerror(self.state))
+                        .to_string_lossy()
+                        .into(),
+                ));
+            }
+        };
+
+        self.buffer_len = read_size as usize;
+        Ok(read_size)
     }
 }
 
@@ -179,7 +272,77 @@ where
     R: Read,
 {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        todo!()
+        if self.buffer_pos == self.buffer_len {
+            self.buffer_pos = 0;
+            // re-fill the buffer
+            match self.decompress_block() {
+                Ok(size) if size == 0 => {
+                    // EOF
+                    return Ok(0);
+                }
+                Err(Error::ProcessBlock(msg)) => {
+                    return Err(io::Error::new(ErrorKind::Other, msg));
+                }
+                Err(Error::Io(e)) => {
+                    return Err(e);
+                }
+                Ok(_) => {}
+                _ => {
+                    unreachable!();
+                }
+            }
+        }
+
+        assert!(self.buffer_pos < self.buffer_len);
+        // have data from buffer to read
+        let remaining_size = self.buffer_len - self.buffer_pos;
+
+        let mut required_length = buf.len();
+        if required_length > remaining_size {
+            required_length = remaining_size;
+        }
+
+        unsafe {
+            buf.as_mut_ptr().copy_from(
+                self.buffer[self.buffer_pos..].as_ptr() as *const u8,
+                required_length,
+            );
+        }
+        self.buffer_pos += required_length;
+        Ok(required_length)
     }
 }
-*/
+
+impl<'a, R> Drop for Bz3Decoder<'a, R>
+where
+    R: Read,
+{
+    fn drop(&mut self) {
+        unsafe {
+            bz3_free(self.state);
+        }
+    }
+}
+
+fn init_buffer(size: usize) -> Vec<MaybeUninit<u8>> {
+    let mut buffer = Vec::<MaybeUninit<u8>>::with_capacity(size);
+    unsafe {
+        buffer.set_len(size);
+    }
+    buffer
+}
+
+fn create_bz3_state(block_size: i32) -> *mut bz3_state {
+    unsafe {
+        let state = bz3_new(block_size);
+        if state.is_null() {
+            panic!("Allocation fails");
+        }
+        state
+    }
+}
+
+#[inline(always)]
+unsafe fn transmute_uninitialized_buffer(buffer: &mut [MaybeUninit<u8>]) -> &mut [u8] {
+    mem::transmute(buffer)
+}

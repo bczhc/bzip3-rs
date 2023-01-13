@@ -11,4 +11,6 @@ pub enum Error {
     BlockSize,
     #[error("{0}")]
     ProcessBlock(String),
+    #[error("Invalid file signature")]
+    InvalidSignature,
 }

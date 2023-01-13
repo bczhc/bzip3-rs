@@ -35,12 +35,12 @@ fn main() -> anyhow::Result<()> {
     let mut reader = stdin().lock();
 
     if decompress {
-        bzip3::stream::decompress(&mut reader, &mut writer)?;
+        let mut decoder = bzip3::read::Bz3Decoder::new(&mut reader).unwrap();
+        eprintln!("Block size: {}", decoder.block_size());
+        io::copy(&mut decoder, &mut writer).unwrap();
     } else {
         let block_size = matches.get_one::<String>("block-size").unwrap();
         let block_size = ByteSize::from_str(block_size).unwrap().0 as usize;
-
-        // bzip3::stream::compress(&mut reader, &mut writer, block_size)?;
 
         let mut encoder = bzip3::read::Bz3Encoder::new(&mut reader, block_size).unwrap();
         io::copy(&mut encoder, &mut writer).unwrap();

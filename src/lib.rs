@@ -1,3 +1,5 @@
+extern crate core;
+
 /// # BZip3-rs
 ///
 /// BZip3 file structure:
@@ -6,6 +8,8 @@
 ///
 /// Structure of each block:
 /// \[ new size (i32) | read size (i32) | data \]
+///
+/// `new size` is the data size after compression, and `read size` is the original data size.
 use bytesize::ByteSize;
 use std::io::Read;
 
