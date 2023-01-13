@@ -29,6 +29,10 @@ where
     R: Read,
 {
     /// The block size must be between 65kiB and 511MiB.
+    ///
+    /// # Errors
+    ///
+    /// This returns [`Error::BlockSize`] if the block size is invalid.
     pub fn new(reader: &'a mut R, block_size: usize) -> Result<Self> {
         if check_block_size(block_size).is_err() {
             return Err(Error::BlockSize);
@@ -70,14 +74,13 @@ where
             let buffer =
                 slice::from_raw_parts_mut(self.buffer.as_mut_ptr() as *mut u8, self.buffer.len());
 
-            // structure of a block: [ new_size (i32) | read_size (i32) | buffer ]
+            // structure of a block: [ new_size (i32) | read_size (i32) | compressed data ]
             // skip 8 bytes to write the buffer first
-            let buffer_buffer = &mut buffer[8..];
+            let data_buffer = &mut buffer[8..];
 
-            let read_size = self.reader.try_read_exact(buffer_buffer)?;
+            let read_size = self.reader.try_read_exact(data_buffer)?;
 
-            let new_size =
-                bz3_encode_block(self.state, buffer_buffer.as_mut_ptr(), read_size as i32);
+            let new_size = bz3_encode_block(self.state, data_buffer.as_mut_ptr(), read_size as i32);
             if new_size == -1 {
                 return Err(Error::ProcessBlock(
                     CStr::from_ptr(bz3_strerror(self.state))

@@ -1,3 +1,11 @@
+/// # BZip3-rs
+///
+/// BZip3 file structure:
+///
+/// \[ magic number (\[u8; 5\]) | block size (i32) | block1 | block2 | blockN... \]
+///
+/// Structure of each block:
+/// \[ new size (i32) | read size (i32) | data \]
 use bytesize::ByteSize;
 use std::io::Read;
 
