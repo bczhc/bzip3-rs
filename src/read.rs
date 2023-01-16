@@ -24,6 +24,7 @@ where
     buffer: Vec<MaybeUninit<u8>>,
     buffer_pos: usize,
     buffer_len: usize,
+    block_size: usize,
 }
 
 impl<'a, R> Bz3Encoder<'a, R>
@@ -66,6 +67,7 @@ where
             buffer,
             buffer_pos: 0,
             buffer_len: header.get_ref().len(), /* default buffer holds the header */
+            block_size,
         })
     }
 
@@ -80,7 +82,9 @@ where
             // skip 8 bytes to write the buffer first
             let data_buffer = &mut buffer[8..];
 
-            let read_size = self.reader.try_read_exact(data_buffer)?;
+            let read_size = self
+                .reader
+                .try_read_exact(&mut data_buffer[..self.block_size])?;
 
             let new_size = bz3_encode_block(self.state, data_buffer.as_mut_ptr(), read_size as i32);
             if new_size == -1 {
