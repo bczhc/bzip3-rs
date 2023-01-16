@@ -98,16 +98,17 @@ where
     W: Write,
 {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let data_buffer = &mut self.buffer[..self.block_size];
-
         let mut write_size = buf.len();
-        let remaining_size = data_buffer.len() - self.buffer_pos;
+        let remaining_size = self.block_size - self.buffer_pos;
 
         if write_size > remaining_size {
             write_size = remaining_size;
         }
 
-        uninit_copy_from_slice(&buf[..write_size], &mut data_buffer[..write_size]);
+        uninit_copy_from_slice(
+            &buf[..write_size],
+            &mut self.buffer[self.buffer_pos..(self.buffer_pos + write_size)],
+        );
 
         self.buffer_pos += write_size;
 
@@ -115,6 +116,7 @@ where
             // process the whole buffer
             // here the whole data with block_size is filled and needs to be compressed
             self.compress_block().map_err(Error::to_io_error)?;
+            self.buffer_pos = 0;
         }
 
         Ok(write_size)
@@ -189,7 +191,8 @@ where
         }
         let block_size = cursor.read_i32::<LE>().unwrap();
         // reinitialize the buffer
-        self.buffer = init_buffer(block_size as usize);
+        let buffer_size = block_size + block_size / 50 + 32;
+        self.buffer = init_buffer(buffer_size as usize);
         self.state = create_bz3_state(block_size);
         Ok(())
     }
@@ -232,7 +235,10 @@ where
             if write_size > needed_size {
                 write_size = needed_size;
             }
-            uninit_copy_from_slice(&buf[..write_size], &mut self.buffer[..write_size]);
+            uninit_copy_from_slice(
+                &buf[..write_size],
+                &mut self.buffer[self.buffer_pos..(self.buffer_pos + write_size)],
+            );
             self.buffer_pos += write_size;
             if self.buffer_pos == self.header_len {
                 // header prepared
@@ -249,7 +255,9 @@ where
             if write_size > needed_size {
                 write_size = needed_size;
             }
-            self.block_header_buf[..write_size].copy_from_slice(&buf[..write_size]);
+            self.block_header_buf[..write_size].copy_from_slice(
+                &buf[self.block_header_buf_pos..(self.block_header_buf_pos + write_size)],
+            );
             self.block_header_buf_pos += write_size;
             if self.block_header_buf_pos == BLOCK_HEADER_SIZE {
                 // resolve block header
@@ -267,7 +275,10 @@ where
             if write_size > needed_size {
                 write_size = needed_size;
             }
-            uninit_copy_from_slice(&buf[..write_size], &mut self.buffer[..write_size]);
+            uninit_copy_from_slice(
+                &buf[..write_size],
+                &mut self.buffer[self.buffer_pos..(self.buffer_pos + write_size)],
+            );
             self.buffer_pos += write_size;
             if self.buffer_pos == block_header.new_size as usize {
                 self.decompress_block().map_err(Error::to_io_error)?;

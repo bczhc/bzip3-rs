@@ -34,6 +34,7 @@ fn test() {
 
     for data_size in test_size_array {
         for block_size in block_size_array {
+            println!("Test: {:?}", (data_size, block_size));
             test_read_based(data_size, block_size);
             test_write_based(data_size, block_size);
         }
@@ -66,7 +67,6 @@ fn test_read_based(data_size: usize, block_size: usize) {
 
     let mut compressed = Cursor::new(Vec::new());
     {
-        println!("encode: {:?}", (data_size, block_size));
         let mut reader = Cursor::new(&mut data);
         let mut encoder = read::Bz3Encoder::new(&mut reader, block_size).unwrap();
         io::copy(&mut encoder, &mut compressed).unwrap();
@@ -75,7 +75,6 @@ fn test_read_based(data_size: usize, block_size: usize) {
 
     let mut uncompressed = Cursor::new(Vec::new());
     {
-        println!("decode: {:?}", (data_size, block_size));
         let mut reader = Cursor::new(compressed);
         let mut decoder = read::Bz3Decoder::new(&mut reader).unwrap();
         assert_eq!(decoder.block_size() as usize, block_size);
