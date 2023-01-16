@@ -1,5 +1,9 @@
 extern crate core;
 
+use std::io::Read;
+use std::mem;
+use std::mem::MaybeUninit;
+
 /// # BZip3-rs
 ///
 /// BZip3 file structure:
@@ -11,7 +15,8 @@ extern crate core;
 ///
 /// `new size` is the data size after compression, and `read size` is the original data size.
 use bytesize::ByteSize;
-use std::io::Read;
+
+use libbzip3_sys::{bz3_new, bz3_state};
 
 pub mod errors;
 pub mod read;
@@ -88,5 +93,35 @@ where
                 }
             }
         }
+    }
+}
+
+fn init_buffer(size: usize) -> Vec<MaybeUninit<u8>> {
+    let mut buffer = Vec::<MaybeUninit<u8>>::with_capacity(size);
+    unsafe {
+        buffer.set_len(size);
+    }
+    buffer
+}
+
+fn create_bz3_state(block_size: i32) -> *mut bz3_state {
+    unsafe {
+        let state = bz3_new(block_size);
+        if state.is_null() {
+            panic!("Allocation fails");
+        }
+        state
+    }
+}
+
+#[inline(always)]
+unsafe fn transmute_uninitialized_buffer(buffer: &mut [MaybeUninit<u8>]) -> &mut [u8] {
+    mem::transmute(buffer)
+}
+
+fn uninit_copy_from_slice(src: &[u8], dst: &mut [MaybeUninit<u8>]) {
+    unsafe {
+        let transmute: &[MaybeUninit<u8>] = mem::transmute(src);
+        dst.copy_from_slice(transmute);
     }
 }

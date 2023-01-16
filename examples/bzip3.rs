@@ -4,6 +4,7 @@ use std::io::{stdin, stdout, BufWriter};
 use std::str::FromStr;
 
 use bytesize::ByteSize;
+use bzip3::write;
 use clap::{Arg, ArgAction, Command};
 
 fn main() -> anyhow::Result<()> {
@@ -35,15 +36,13 @@ fn main() -> anyhow::Result<()> {
     let mut reader = stdin().lock();
 
     if decompress {
-        let mut decoder = bzip3::read::Bz3Decoder::new(&mut reader).unwrap();
-        eprintln!("Block size: {}", decoder.block_size());
-        io::copy(&mut decoder, &mut writer).unwrap();
+        let mut decoder = write::Bz3Decoder::new(&mut writer);
+        io::copy(&mut reader, &mut decoder).unwrap();
     } else {
         let block_size = matches.get_one::<String>("block-size").unwrap();
         let block_size = ByteSize::from_str(block_size).unwrap().0 as usize;
-
-        let mut encoder = bzip3::read::Bz3Encoder::new(&mut reader, block_size).unwrap();
-        io::copy(&mut encoder, &mut writer).unwrap();
+        let mut encoder = write::Bz3Encoder::new(&mut writer, block_size).unwrap();
+        io::copy(&mut reader, &mut encoder).unwrap();
     }
     Ok(())
 }

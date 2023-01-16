@@ -3,7 +3,7 @@
 use std::ffi::CStr;
 use std::io::{Cursor, ErrorKind, Read, Write};
 use std::mem::MaybeUninit;
-use std::{io, mem, slice};
+use std::{io, slice};
 
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 
@@ -12,7 +12,10 @@ use libbzip3_sys::{
 };
 
 use crate::errors::*;
-use crate::{check_block_size, TryReadExact, MAGIC_NUMBER};
+use crate::{
+    check_block_size, create_bz3_state, init_buffer, transmute_uninitialized_buffer, TryReadExact,
+    MAGIC_NUMBER,
+};
 
 pub struct Bz3Encoder<'a, R>
 where
@@ -326,27 +329,4 @@ where
             bz3_free(self.state);
         }
     }
-}
-
-fn init_buffer(size: usize) -> Vec<MaybeUninit<u8>> {
-    let mut buffer = Vec::<MaybeUninit<u8>>::with_capacity(size);
-    unsafe {
-        buffer.set_len(size);
-    }
-    buffer
-}
-
-fn create_bz3_state(block_size: i32) -> *mut bz3_state {
-    unsafe {
-        let state = bz3_new(block_size);
-        if state.is_null() {
-            panic!("Allocation fails");
-        }
-        state
-    }
-}
-
-#[inline(always)]
-unsafe fn transmute_uninitialized_buffer(buffer: &mut [MaybeUninit<u8>]) -> &mut [u8] {
-    mem::transmute(buffer)
 }
