@@ -16,3 +16,4 @@ libbzip3-sys = { path = "libbzip3-sys" }
 # examples/
 clap = "4.0.32"
 anyhow = "1.0.68"
+rand = "0.8.5"
