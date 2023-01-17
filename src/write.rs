@@ -8,7 +8,7 @@ use std::{io, mem};
 
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 
-use libbzip3_sys::{bz3_decode_block, bz3_encode_block, bz3_state, bz3_strerror};
+use libbzip3_sys::{bz3_decode_block, bz3_encode_block, bz3_free, bz3_state, bz3_strerror};
 
 use crate::errors::*;
 use crate::{
@@ -90,6 +90,9 @@ where
 {
     fn drop(&mut self) {
         let _ = self.flush();
+        unsafe {
+            bz3_free(self.state);
+        }
     }
 }
 
@@ -295,5 +298,16 @@ where
         // because in `write()`, when the block buffer is filled,
         // it immediately decompresses the block and writes to `self.reader`
         Ok(())
+    }
+}
+
+impl<'a, W> Drop for Bz3Decoder<'a, W>
+where
+    W: Write,
+{
+    fn drop(&mut self) {
+        unsafe {
+            bz3_free(self.state);
+        }
     }
 }
