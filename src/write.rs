@@ -31,6 +31,11 @@ impl<'a, W> Bz3Encoder<'a, W>
 where
     W: Write,
 {
+    /// The block size must be between 65kiB and 511MiB.
+    ///
+    /// # Errors
+    ///
+    /// This returns [`Error::BlockSize`] if the block size is invalid.
     pub fn new(writer: &'a mut W, block_size: usize) -> Result<Self> {
         if check_block_size(block_size).is_err() {
             return Err(Error::BlockSize);
@@ -145,7 +150,7 @@ where
     header_len: usize,
     block_header_buf: [u8; BLOCK_HEADER_SIZE], /* (i32, i32) */
     block_header_buf_pos: usize,
-    /// is present, the block header has been read, and this decoder now is waiting
+    /// if present, the block header has been read, and this decoder now is waiting
     /// for reading the block data
     block_header: Option<BlockHeader>,
 }
