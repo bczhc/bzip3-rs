@@ -23,3 +23,6 @@ cfg-if = "1.0.0"
 
 [features]
 bundled = []
+
+[package.metadata.docs.rs]
+features = ["bundled"]
