@@ -12,6 +12,10 @@ homepage = "https://github.com/bczhc/bzip3-rs"
 documentation = "https://github.com/bczhc/bzip3-rs"
 keywords = ["compression", "decompression", "encoding", "ffi"]
 categories = ["compression", "api-bindings", "external-ffi-bindings"]
+exclude = [
+    "bzip3/examples",
+    "bzip3/etc",
+]
 
 [dependencies]
 
