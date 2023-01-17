@@ -12,6 +12,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
+        with:
+          submodules: true
 
       - name: Install Rust
         run: |
@@ -24,5 +26,5 @@ jobs:
         run: cargo build --workspace --features bundled
       - name: Test
         run: |
-          cargo test --workspace
-          cargo test --workspace --release
+          cargo test --workspace --features bundled
+          cargo test --workspace --release --features bundled
