@@ -30,7 +30,7 @@ where
         let mut buffer = vec![MaybeUninit::<u8>::uninit(); buffer_size];
         let buffer = slice::from_raw_parts_mut(buffer.as_mut_ptr() as *mut u8, buffer_size);
         loop {
-            let read_len = reader.try_read_exact(buffer)?;
+            let read_len = reader.try_read_exact(&mut buffer[..block_size])?;
             if read_len == 0 {
                 break;
             }
