@@ -28,3 +28,6 @@ rand = "0.8.5"
 
 [features]
 bundled = ["libbzip3-sys/bundled"]
+
+[package.metadata.docs.rs]
+features = ["bundled"]
