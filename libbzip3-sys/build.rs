@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 const DEFAULT_LIB_DIR: &str = "/usr/lib";
 const DEFAULT_INCLUDE_DIR: &str = "/usr/include";
+#[cfg(feature = "bundled")]
 const BZIP3_REPO_DIR: &str = "./bzip3";
 
 #[allow(unused)]

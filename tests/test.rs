@@ -3,6 +3,7 @@ use std::io::Cursor;
 
 use bytesize::ByteSize;
 use rand::{thread_rng, RngCore};
+use regex::Regex;
 
 use bzip3::{read, write};
 
@@ -39,6 +40,14 @@ fn test() {
             test_write_based(data_size, block_size);
         }
     }
+}
+
+#[test]
+fn version() {
+    let version = bzip3::version();
+    assert!(Regex::new(r#"^[0-9]+\.[0-9]+\.[0-9]+$"#)
+        .unwrap()
+        .is_match(version));
 }
 
 fn test_write_based(data_size: usize, block_size: usize) {

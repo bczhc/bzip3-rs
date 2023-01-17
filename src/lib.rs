@@ -1,8 +1,8 @@
 extern crate core;
 
-use std::io::Read;
 use std::mem;
 use std::mem::MaybeUninit;
+use std::{ffi::CStr, io::Read};
 
 /// # BZip3-rs
 ///
@@ -34,7 +34,7 @@ pub(crate) fn check_block_size(block_size: usize) -> Result<(), ()> {
     }
 }
 
-pub trait TryReadExact {
+pub(crate) trait TryReadExact {
     /// Read exact data
     ///
     /// This function blocks. It reads exact data, and returns bytes it reads. The return value
@@ -42,31 +42,6 @@ pub trait TryReadExact {
     ///
     /// When reaching EOF, the return value will be less than the size of the given buffer,
     /// or just zero.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use std::io::stdin;
-    /// use bzip3::TryReadExact;
-    ///
-    /// let mut stdin = stdin();
-    /// let mut buf = [0_u8; 5];
-    /// loop {
-    ///     let result = stdin.try_read_exact(&mut buf);
-    ///     match result {
-    ///         Ok(r) => {
-    ///             if r == 0 {
-    ///                 // EOF
-    ///                 break;
-    ///             }
-    ///             println!("Read: {:?}", &buf[..r]);
-    ///         }
-    ///         Err(e) => {
-    ///             eprintln!("IO error: {}", e);
-    ///         }
-    ///     }
-    /// }
-    /// ```
     fn try_read_exact(&mut self, buf: &mut [u8]) -> std::io::Result<usize>;
 }
 
@@ -124,4 +99,10 @@ fn uninit_copy_from_slice(src: &[u8], dst: &mut [MaybeUninit<u8>]) {
         let transmute: &[MaybeUninit<u8>] = mem::transmute(src);
         dst.copy_from_slice(transmute);
     }
+}
+
+pub fn version() -> &'static str {
+    unsafe { CStr::from_ptr(libbzip3_sys::bz3_version()) }
+        .to_str()
+        .expect("Invalid UTF-8")
 }
