@@ -19,9 +19,12 @@ members = ["libbzip3-sys"]
 thiserror = "1.0.38"
 byteorder = "1.4.3"
 bytesize = "1.1.0"
-libbzip3-sys = { path = "libbzip3-sys", version = "0.2.0", features = ["bundled"] }
+libbzip3-sys = { path = "libbzip3-sys", version = "0.2.1" }
 
 [dev-dependencies]
 clap = "4.0.32"
 anyhow = "1.0.68"
 rand = "0.8.5"
+
+[features]
+bundled = ["libbzip3-sys/bundled"]
