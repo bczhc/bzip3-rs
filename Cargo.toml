@@ -1,9 +1,9 @@
 [package]
 name = "bzip3"
 authors = ["bczhc <bczhc0@126.com>"]
-version = "0.2.2"
+version = "0.2.3"
 edition = "2021"
-license = "MIT/Apache-2.0"
+license = "LGPL-3.0-only"
 readme = "README.md"
 description = "BZip3 compression library"
 repository = "https://github.com/bczhc/bzip3-rs"
@@ -19,7 +19,7 @@ members = ["libbzip3-sys"]
 thiserror = "1.0.38"
 byteorder = "1.4.3"
 bytesize = "1.1.0"
-libbzip3-sys = { path = "libbzip3-sys", version = "0.2.1" }
+libbzip3-sys = { path = "libbzip3-sys", version = "0.2.2" }
 
 [dev-dependencies]
 clap = "4.0.32"
