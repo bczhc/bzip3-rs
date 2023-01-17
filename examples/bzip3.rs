@@ -19,7 +19,7 @@ fn main() -> anyhow::Result<()> {
             Arg::new("block-size")
                 .short('b')
                 .long("block-size")
-                .default_value("1MiB")
+                .default_value("16MiB")
                 .conflicts_with("decompress"),
         )
         .arg(
