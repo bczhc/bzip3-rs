@@ -1,6 +1,6 @@
 use std::ffi::CStr;
 use std::io;
-use std::io::{stdin, stdout, BufWriter};
+use std::io::{sink, stdin, stdout, BufWriter};
 use std::str::FromStr;
 
 use bytesize::ByteSize;
@@ -36,7 +36,8 @@ fn main() -> anyhow::Result<()> {
     let mut reader = stdin().lock();
 
     if decompress {
-        let mut decoder = write::Bz3Decoder::new(&mut writer);
+        let mut sink = sink();
+        let mut decoder = write::Bz3Decoder::new(&mut sink);
         io::copy(&mut reader, &mut decoder).unwrap();
     } else {
         let block_size = matches.get_one::<String>("block-size").unwrap();

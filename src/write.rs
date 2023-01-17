@@ -258,9 +258,10 @@ where
             if write_size > needed_size {
                 write_size = needed_size;
             }
-            self.block_header_buf[..write_size].copy_from_slice(
-                &buf[self.block_header_buf_pos..(self.block_header_buf_pos + write_size)],
-            );
+            self.block_header_buf
+                [self.block_header_buf_pos..(self.block_header_buf_pos + write_size)]
+                .copy_from_slice(&buf[..write_size]);
+
             self.block_header_buf_pos += write_size;
             if self.block_header_buf_pos == BLOCK_HEADER_SIZE {
                 // resolve block header
