@@ -1,11 +1,12 @@
 use std::ffi::CStr;
 use std::io;
-use std::io::{sink, stdin, stdout, BufWriter};
+use std::io::{stdin, stdout, BufWriter};
 use std::str::FromStr;
 
 use bytesize::ByteSize;
-use bzip3::write;
 use clap::{Arg, ArgAction, Command};
+
+use bzip3::write;
 
 fn main() -> anyhow::Result<()> {
     let version = unsafe { CStr::from_ptr(libbzip3_sys::bz3_version()) }
@@ -36,8 +37,7 @@ fn main() -> anyhow::Result<()> {
     let mut reader = stdin().lock();
 
     if decompress {
-        let mut sink = sink();
-        let mut decoder = write::Bz3Decoder::new(&mut sink);
+        let mut decoder = write::Bz3Decoder::new(&mut writer);
         io::copy(&mut reader, &mut decoder).unwrap();
     } else {
         let block_size = matches.get_one::<String>("block-size").unwrap();
