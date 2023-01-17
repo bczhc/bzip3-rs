@@ -19,7 +19,7 @@ members = ["libbzip3-sys"]
 thiserror = "1.0.38"
 byteorder = "1.4.3"
 bytesize = "1.1.0"
-libbzip3-sys = { path = "libbzip3-sys", version = "0.1.0" }
+libbzip3-sys = { path = "libbzip3-sys", version = "0.1.0", features = ["bundled"] }
 
 [dev-dependencies]
 clap = "4.0.32"

@@ -17,3 +17,9 @@ categories = ["compression", "api-bindings", "external-ffi-bindings"]
 
 [build-dependencies]
 bindgen = "0.63.0"
+regex = "1.7.1"
+cc = "1.0.78"
+cfg-if = "1.0.0"
+
+[features]
+bundled = []

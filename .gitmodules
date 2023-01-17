@@ -1,0 +1,3 @@
+[submodule "libbzip3-sys/bzip3"]
+	path = libbzip3-sys/bzip3
+	url = https://github.com/kspalaiologos/bzip3
