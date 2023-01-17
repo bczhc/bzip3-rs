@@ -17,7 +17,7 @@ pub enum Error {
 }
 
 impl Error {
-    pub(crate) fn to_io_error(self) -> io::Error {
+    pub(crate) fn into_io_error(self) -> io::Error {
         match self {
             Error::Io(e) => e,
             e => io::Error::new(ErrorKind::Other, e),

@@ -118,7 +118,7 @@ where
         if self.buffer_pos == self.block_size {
             // process the whole buffer
             // here the whole data with block_size is filled and needs to be compressed
-            self.compress_block().map_err(Error::to_io_error)?;
+            self.compress_block().map_err(Error::into_io_error)?;
             self.buffer_pos = 0;
         }
 
@@ -126,7 +126,7 @@ where
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        self.compress_block().map_err(Error::to_io_error)?;
+        self.compress_block().map_err(Error::into_io_error)?;
         self.buffer_pos = 0;
         Ok(())
     }
@@ -245,7 +245,7 @@ where
             self.buffer_pos += write_size;
             if self.buffer_pos == self.header_len {
                 // header prepared
-                self.initialize().map_err(Error::to_io_error)?;
+                self.initialize().map_err(Error::into_io_error)?;
                 self.buffer_pos = 0;
             }
             return Ok(write_size);
@@ -285,7 +285,7 @@ where
             );
             self.buffer_pos += write_size;
             if self.buffer_pos == block_header.new_size as usize {
-                self.decompress_block().map_err(Error::to_io_error)?;
+                self.decompress_block().map_err(Error::into_io_error)?;
                 // reset block header, wait for the next block's header
                 self.block_header = None;
                 self.buffer_pos = 0;
