@@ -166,12 +166,12 @@ where
     }
 }
 
-pub struct Bz3Decoder<'a, R>
+pub struct Bz3Decoder<R>
 where
     R: Read,
 {
     state: *mut bz3_state,
-    reader: &'a mut R,
+    reader: R,
     /// The temporary buffer for [`Read::read`]
     buffer: Vec<MaybeUninit<u8>>,
     buffer_pos: usize,
@@ -179,7 +179,7 @@ where
     block_size: i32,
 }
 
-impl<'a, R> Bz3Decoder<'a, R>
+impl<R> Bz3Decoder<R>
 where
     R: Read,
 {
@@ -190,7 +190,7 @@ where
     /// When creating, this function reads the bzip3 header
     /// from `reader`, and checks it. Error types are
     /// [`io::Error`] and [`Error::InvalidSignature`].
-    pub fn new(reader: &'a mut R) -> Result<Self> {
+    pub fn new(mut reader: R) -> Result<Self> {
         let mut signature = [0_u8; MAGIC_NUMBER.len()];
         let result = reader.read_exact(&mut signature);
         if let Err(e) = result {
@@ -274,7 +274,7 @@ where
     }
 }
 
-impl<'a, R> Read for Bz3Decoder<'a, R>
+impl<R> Read for Bz3Decoder<R>
 where
     R: Read,
 {
@@ -320,7 +320,7 @@ where
     }
 }
 
-impl<'a, R> Drop for Bz3Decoder<'a, R>
+impl<R> Drop for Bz3Decoder<R>
 where
     R: Read,
 {

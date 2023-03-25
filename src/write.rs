@@ -139,11 +139,11 @@ where
 
 const BLOCK_HEADER_SIZE: usize = 2 * size_of::<i32>();
 
-pub struct Bz3Decoder<'a, W>
+pub struct Bz3Decoder<W>
 where
     W: Write,
 {
-    writer: &'a mut W,
+    writer: W,
     state: *mut bz3_state,
     buffer: Vec<MaybeUninit<u8>>,
     buffer_pos: usize,
@@ -171,11 +171,11 @@ impl BlockHeader {
     }
 }
 
-impl<'a, W> Bz3Decoder<'a, W>
+impl<W> Bz3Decoder<W>
 where
     W: Write,
 {
-    pub fn new(writer: &'a mut W) -> Self {
+    pub fn new(writer: W) -> Self {
         let header_len = MAGIC_NUMBER.len() + size_of::<i32>();
         Self {
             state: null_mut(), /* here can't get the block size */
@@ -231,7 +231,7 @@ where
     }
 }
 
-impl<'a, W> Write for Bz3Decoder<'a, W>
+impl<W> Write for Bz3Decoder<W>
 where
     W: Write,
 {
@@ -307,7 +307,7 @@ where
     }
 }
 
-impl<'a, W> Drop for Bz3Decoder<'a, W>
+impl<W> Drop for Bz3Decoder<W>
 where
     W: Write,
 {
