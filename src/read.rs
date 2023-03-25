@@ -17,12 +17,12 @@ use crate::{
     MAGIC_NUMBER,
 };
 
-pub struct Bz3Encoder<'a, R>
+pub struct Bz3Encoder<R>
 where
     R: Read,
 {
     state: *mut bz3_state,
-    reader: &'a mut R,
+    reader: R,
     /// The temporary buffer for [`Read::read`]
     buffer: Vec<MaybeUninit<u8>>,
     buffer_pos: usize,
@@ -30,7 +30,7 @@ where
     block_size: usize,
 }
 
-impl<'a, R> Bz3Encoder<'a, R>
+impl<R> Bz3Encoder<R>
 where
     R: Read,
 {
@@ -39,7 +39,7 @@ where
     /// # Errors
     ///
     /// This returns [`Error::BlockSize`] if the block size is invalid.
-    pub fn new(reader: &'a mut R, block_size: usize) -> Result<Self> {
+    pub fn new(reader: R, block_size: usize) -> Result<Self> {
         if check_block_size(block_size).is_err() {
             return Err(Error::BlockSize);
         }
@@ -109,7 +109,7 @@ where
     }
 }
 
-impl<'a, R> Read for Bz3Encoder<'a, R>
+impl<R> Read for Bz3Encoder<R>
 where
     R: Read,
 {
@@ -155,7 +155,7 @@ where
     }
 }
 
-impl<'a, R> Drop for Bz3Encoder<'a, R>
+impl<R> Drop for Bz3Encoder<R>
 where
     R: Read,
 {

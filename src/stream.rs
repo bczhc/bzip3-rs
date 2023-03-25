@@ -11,7 +11,7 @@ use std::slice;
 /// Compress `reader` to `writer`.
 ///
 /// The block size must be between 65kiB and 511MiB.
-pub fn compress<R, W>(reader: &mut R, writer: &mut W, block_size: usize) -> Result<()>
+pub fn compress<R, W>(mut reader: R, mut writer: W, block_size: usize) -> Result<()>
 where
     R: Read,
     W: Write,
@@ -48,7 +48,7 @@ where
 }
 
 /// Decompress `reader` to `writer`.
-pub fn decompress<R, W>(reader: &mut R, writer: &mut W) -> Result<()>
+pub fn decompress<R, W>(mut reader: R, mut writer: W) -> Result<()>
 where
     R: Read,
     W: Write,

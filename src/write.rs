@@ -16,18 +16,18 @@ use crate::{
     uninit_copy_from_slice, MAGIC_NUMBER,
 };
 
-pub struct Bz3Encoder<'a, W>
+pub struct Bz3Encoder<W>
 where
     W: Write,
 {
-    writer: &'a mut W,
+    writer: W,
     state: *mut bz3_state,
     buffer: Vec<MaybeUninit<u8>>,
     buffer_pos: usize,
     block_size: usize,
 }
 
-impl<'a, W> Bz3Encoder<'a, W>
+impl<W> Bz3Encoder<W>
 where
     W: Write,
 {
@@ -36,7 +36,7 @@ where
     /// # Errors
     ///
     /// This returns [`Error::BlockSize`] if the block size is invalid.
-    pub fn new(writer: &'a mut W, block_size: usize) -> Result<Self> {
+    pub fn new(mut writer: W, block_size: usize) -> Result<Self> {
         if check_block_size(block_size).is_err() {
             return Err(Error::BlockSize);
         }
@@ -89,7 +89,7 @@ where
     }
 }
 
-impl<'a, W> Drop for Bz3Encoder<'a, W>
+impl<W> Drop for Bz3Encoder<W>
 where
     W: Write,
 {
@@ -101,7 +101,7 @@ where
     }
 }
 
-impl<'a, W> Write for Bz3Encoder<'a, W>
+impl<W> Write for Bz3Encoder<W>
 where
     W: Write,
 {
