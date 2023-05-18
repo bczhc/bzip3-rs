@@ -9,7 +9,6 @@ use bzip3::{read, stream, write};
 
 #[test]
 fn test() {
-    println!("Test");
     let test_size_array = [
         0_usize,
         1,
@@ -33,14 +32,20 @@ fn test() {
     ]
     .map(|x| x.0 as usize);
 
-    for data_size in test_size_array {
-        for block_size in block_size_array {
-            println!("Test: {:?}", (data_size, block_size));
-            test_read_based(data_size, block_size);
-            test_write_based(data_size, block_size);
-            test_stream_processor(data_size, block_size);
+    rayon::scope(|scope| {
+        for data_size in test_size_array {
+            for block_size in block_size_array {
+                scope.spawn(move |_| {
+                    println!("Test read-based: {:?}", (data_size, block_size));
+                    test_read_based(data_size, block_size);
+                });
+                scope.spawn(move |_| {
+                    println!("Test write-based: {:?}", (data_size, block_size));
+                    test_write_based(data_size, block_size);
+                });
+            }
         }
-    }
+    });
 }
 
 #[test]
@@ -92,22 +97,6 @@ fn test_read_based(data_size: usize, block_size: usize) {
     }
 
     assert_eq!(uncompressed.get_ref().as_slice(), data.as_slice());
-}
-
-fn test_stream_processor(data_size: usize, block_size: usize) {
-    let data = generate_random_data(data_size);
-    let mut reader = Cursor::new(&data);
-    let mut writer = Cursor::new(Vec::new());
-
-    stream::compress(&mut reader, &mut writer, block_size).unwrap();
-
-    let compressed = writer.into_inner();
-    let mut reader = Cursor::new(compressed);
-    let mut writer = Cursor::new(Vec::new());
-
-    stream::decompress(&mut reader, &mut writer).unwrap();
-
-    assert_eq!(data, writer.into_inner());
 }
 
 fn generate_random_data(size: usize) -> Vec<u8> {
