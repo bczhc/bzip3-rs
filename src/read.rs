@@ -23,7 +23,7 @@ where
 {
     state: *mut bz3_state,
     reader: R,
-    /// The temporary buffer for [`Read::read`]
+    /// Temporary buffer for [`Read::read`]
     buffer: Vec<MaybeUninit<u8>>,
     buffer_pos: usize,
     buffer_len: usize,
@@ -172,7 +172,7 @@ where
 {
     state: *mut bz3_state,
     reader: R,
-    /// The temporary buffer for [`Read::read`]
+    /// Temporary buffer for [`Read::read`]
     buffer: Vec<MaybeUninit<u8>>,
     buffer_pos: usize,
     buffer_len: usize,

@@ -5,7 +5,7 @@ use bytesize::ByteSize;
 use rand::{thread_rng, RngCore};
 use regex::Regex;
 
-use bzip3::{read, stream, write};
+use bzip3::{read, write};
 
 #[test]
 fn test() {

@@ -1,19 +1,35 @@
+//! BZip3-rs
+//! ----
+//! BZip3 compression for Rust.
+//!
+//! # BZip3 file structure:
+//!
+//! \[ magic number (\[u8; 5\]) | block size (i32) | block1 | block2 | blockN... \]
+//!
+//! Structure of each block:
+//! \[ new size (i32) | read size (i32) | data \]
+//!
+//! `new size` is the data size after compression, and `read size` is the original data size.
+//!
+//! # Examples
+//!
+//! ```
+//! use std::io::Read;
+//! use bzip3::read::{Bz3Decoder, Bz3Encoder};
+//! let data = "hello, world".as_bytes();
+//! let mut  compressor = Bz3Encoder::new(data, 100 * 1024 /* 100 kiB */).unwrap();
+//! let mut  decompressor = Bz3Decoder::new(&mut compressor).unwrap();
+//!
+//! let mut contents = String::new();
+//! decompressor.read_to_string(&mut contents).unwrap();
+//! assert_eq!(contents, "hello, world");
+//! ```
 extern crate core;
 
 use std::mem;
 use std::mem::MaybeUninit;
 use std::{ffi::CStr, io::Read};
 
-/// # BZip3-rs
-///
-/// BZip3 file structure:
-///
-/// \[ magic number (\[u8; 5\]) | block size (i32) | block1 | block2 | blockN... \]
-///
-/// Structure of each block:
-/// \[ new size (i32) | read size (i32) | data \]
-///
-/// `new size` is the data size after compression, and `read size` is the original data size.
 use bytesize::ByteSize;
 
 use libbzip3_sys::{bz3_new, bz3_state};
