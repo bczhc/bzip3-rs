@@ -3,17 +3,15 @@
 use std::ffi::CStr;
 use std::io::{Cursor, Read, Write};
 use std::mem::{size_of, MaybeUninit};
-use std::ptr::null_mut;
 use std::{io, mem};
 
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 
-use libbzip3_sys::{bz3_decode_block, bz3_encode_block, bz3_free, bz3_state, bz3_strerror};
+use libbzip3_sys::{bz3_decode_block, bz3_encode_block, bz3_strerror};
 
 use crate::errors::*;
 use crate::{
-    check_block_size, create_bz3_state, init_buffer, transmute_uninitialized_buffer,
-    uninit_copy_from_slice, MAGIC_NUMBER,
+    init_buffer, transmute_uninitialized_buffer, uninit_copy_from_slice, Bz3State, MAGIC_NUMBER,
 };
 
 pub struct Bz3Encoder<W>
@@ -21,7 +19,7 @@ where
     W: Write,
 {
     writer: W,
-    state: *mut bz3_state,
+    state: Bz3State,
     buffer: Vec<MaybeUninit<u8>>,
     buffer_pos: usize,
     block_size: usize,
@@ -37,9 +35,7 @@ where
     ///
     /// This returns [`Error::BlockSize`] if the block size is invalid.
     pub fn new(mut writer: W, block_size: usize) -> Result<Self> {
-        if check_block_size(block_size).is_err() {
-            return Err(Error::BlockSize);
-        }
+        let state = Bz3State::new(block_size)?;
         let block_size = block_size as i32;
 
         let mut header = Cursor::new([0_u8; MAGIC_NUMBER.len() + size_of::<i32>()]);
@@ -49,8 +45,6 @@ where
 
         let buffer_size = block_size + block_size / 50 + 32;
         let buffer = init_buffer(buffer_size as usize);
-
-        let state = create_bz3_state(block_size);
 
         Ok(Self {
             writer,
@@ -67,15 +61,13 @@ where
         debug_assert!(data_size <= self.block_size);
         unsafe {
             let new_size = bz3_encode_block(
-                self.state,
+                self.state.raw,
                 transmute_uninitialized_buffer(&mut self.buffer).as_mut_ptr(),
                 data_size as i32,
             );
             if new_size == -1 {
                 return Err(Error::ProcessBlock(
-                    CStr::from_ptr(bz3_strerror(self.state))
-                        .to_string_lossy()
-                        .into(),
+                    self.state.error().into()
                 ));
             }
 
@@ -95,9 +87,6 @@ where
 {
     fn drop(&mut self) {
         let _ = self.flush();
-        unsafe {
-            bz3_free(self.state);
-        }
     }
 }
 
@@ -144,7 +133,7 @@ where
     W: Write,
 {
     writer: W,
-    state: *mut bz3_state,
+    state: Option<Bz3State>,
     buffer: Vec<MaybeUninit<u8>>,
     buffer_pos: usize,
     header_len: usize,
@@ -178,7 +167,7 @@ where
     pub fn new(writer: W) -> Self {
         let header_len = MAGIC_NUMBER.len() + size_of::<i32>();
         Self {
-            state: null_mut(), /* here can't get the block size */
+            state: None, /* here can't get the block size */
             writer,
             buffer: init_buffer(header_len), /* need header data to initialize first */
             buffer_pos: 0,
@@ -201,25 +190,26 @@ where
         // reinitialize the buffer
         let buffer_size = block_size + block_size / 50 + 32;
         self.buffer = init_buffer(buffer_size as usize);
-        self.state = create_bz3_state(block_size);
+        self.state = Some(Bz3State::new(block_size as usize)?);
         Ok(())
     }
 
     fn decompress_block(&mut self) -> Result<()> {
+        let state = self.state.as_mut();
+        let state = state.unwrap();
+
         let Some(block_header) = &self.block_header else { unreachable!() };
         unsafe {
             let buffer = transmute_uninitialized_buffer(&mut self.buffer);
             let result = bz3_decode_block(
-                self.state,
+                state.raw,
                 buffer.as_mut_ptr(),
                 block_header.new_size,
                 block_header.read_size,
             );
             if result == -1 {
                 return Err(Error::ProcessBlock(
-                    CStr::from_ptr(bz3_strerror(self.state))
-                        .to_string_lossy()
-                        .into(),
+                    state.error().into()
                 ));
             }
             self.writer.write_all(
@@ -236,7 +226,7 @@ where
     W: Write,
 {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        if self.state.is_null() {
+        if self.state.is_none() {
             // wait for the bzip3 header to initialize the decoder
             let mut write_size = buf.len();
             let needed_size = self.header_len - self.buffer_pos;
@@ -304,16 +294,5 @@ where
         // because in `write()`, when the block buffer is filled,
         // it immediately decompresses the block and writes to `self.reader`
         Ok(())
-    }
-}
-
-impl<W> Drop for Bz3Decoder<W>
-where
-    W: Write,
-{
-    fn drop(&mut self) {
-        unsafe {
-            bz3_free(self.state);
-        }
     }
 }

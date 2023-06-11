@@ -32,7 +32,7 @@ use std::{ffi::CStr, io::Read};
 
 use bytesize::ByteSize;
 
-use libbzip3_sys::{bz3_new, bz3_state};
+use libbzip3_sys::{bz3_free, bz3_new, bz3_state, bz3_strerror};
 
 pub mod errors;
 pub mod read;
@@ -42,14 +42,6 @@ pub use errors::{Error, Result};
 
 /// The signature of a bzip3 file.
 pub const MAGIC_NUMBER: &[u8; 5] = b"BZ3v1";
-
-pub(crate) fn check_block_size(block_size: usize) -> Result<()> {
-    if block_size < ByteSize::kib(65).0 as usize || block_size > ByteSize::mib(511).0 as usize {
-        Err(Error::BlockSize)
-    } else {
-        Ok(())
-    }
-}
 
 pub(crate) trait TryReadExact {
     /// Read exact data
@@ -96,16 +88,6 @@ fn init_buffer(size: usize) -> Vec<MaybeUninit<u8>> {
     buffer
 }
 
-fn create_bz3_state(block_size: i32) -> *mut bz3_state {
-    unsafe {
-        let state = bz3_new(block_size);
-        if state.is_null() {
-            panic!("Allocation fails");
-        }
-        state
-    }
-}
-
 #[inline(always)]
 unsafe fn transmute_uninitialized_buffer(buffer: &mut [MaybeUninit<u8>]) -> &mut [u8] {
     mem::transmute(buffer)
@@ -123,3 +105,52 @@ pub fn version() -> &'static str {
         .to_str()
         .expect("Invalid UTF-8")
 }
+
+pub struct Bz3State {
+    raw: *mut bz3_state,
+}
+
+impl Bz3State {
+    pub fn from_raw(state: *mut bz3_state) -> Bz3State {
+        Bz3State { raw: state }
+    }
+
+    pub fn new(block_size: usize) -> Result<Self> {
+        if block_size < ByteSize::kib(65).0 as usize || block_size > ByteSize::mib(511).0 as usize {
+            return Err(Error::BlockSize);
+        }
+
+        unsafe {
+            let state = bz3_new(block_size as i32);
+            if state.is_null() {
+                panic!("Allocation fails");
+            }
+            Ok(Self::from_raw(state))
+        }
+    }
+
+    #[inline]
+    pub fn as_raw(&mut self) -> *mut bz3_state {
+        self.raw
+    }
+
+    pub fn error(&mut self) -> &'static str {
+        unsafe {
+            // in bzip3 source code, this returns static string literals
+            CStr::from_ptr(bz3_strerror(self.raw))
+                .to_str()
+                .expect("Invalid UTF-8")
+        }
+    }
+}
+
+impl Drop for Bz3State {
+    fn drop(&mut self) {
+        unsafe {
+            bz3_free(self.raw);
+        }
+    }
+}
+
+unsafe impl Send for Bz3State {}
+unsafe impl Sync for Bz3State {}

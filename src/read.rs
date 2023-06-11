@@ -7,21 +7,16 @@ use std::{io, slice};
 
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 
-use libbzip3_sys::{
-    bz3_decode_block, bz3_encode_block, bz3_free, bz3_new, bz3_state, bz3_strerror,
-};
+use libbzip3_sys::{bz3_decode_block, bz3_encode_block, bz3_free, bz3_strerror};
 
 use crate::errors::*;
-use crate::{
-    check_block_size, create_bz3_state, init_buffer, transmute_uninitialized_buffer, TryReadExact,
-    MAGIC_NUMBER,
-};
+use crate::{init_buffer, transmute_uninitialized_buffer, Bz3State, TryReadExact, MAGIC_NUMBER};
 
 pub struct Bz3Encoder<R>
 where
     R: Read,
 {
-    state: *mut bz3_state,
+    state: Bz3State,
     reader: R,
     /// Temporary buffer for [`Read::read`]
     buffer: Vec<MaybeUninit<u8>>,
@@ -40,16 +35,7 @@ where
     ///
     /// This returns [`Error::BlockSize`] if the block size is invalid.
     pub fn new(reader: R, block_size: usize) -> Result<Self> {
-        if check_block_size(block_size).is_err() {
-            return Err(Error::BlockSize);
-        }
-        let state = unsafe {
-            let state = bz3_new(block_size as i32);
-            if state.is_null() {
-                panic!("Allocation fails");
-            }
-            state
-        };
+        let state = Bz3State::new(block_size)?;
 
         let buffer_size = block_size + block_size / 50 + 32 + MAGIC_NUMBER.len() + 4;
         let mut buffer = Vec::<MaybeUninit<u8>>::with_capacity(buffer_size);
@@ -89,12 +75,11 @@ where
                 .reader
                 .try_read_exact(&mut data_buffer[..self.block_size])?;
 
-            let new_size = bz3_encode_block(self.state, data_buffer.as_mut_ptr(), read_size as i32);
+            let new_size =
+                bz3_encode_block(self.state.raw, data_buffer.as_mut_ptr(), read_size as i32);
             if new_size == -1 {
                 return Err(Error::ProcessBlock(
-                    CStr::from_ptr(bz3_strerror(self.state))
-                        .to_string_lossy()
-                        .into(),
+                    self.state.error().into()
                 ));
             }
 
@@ -155,28 +140,17 @@ where
     }
 }
 
-impl<R> Drop for Bz3Encoder<R>
-where
-    R: Read,
-{
-    fn drop(&mut self) {
-        unsafe {
-            bz3_free(self.state);
-        }
-    }
-}
-
 pub struct Bz3Decoder<R>
 where
     R: Read,
 {
-    state: *mut bz3_state,
+    state: Bz3State,
     reader: R,
     /// Temporary buffer for [`Read::read`]
     buffer: Vec<MaybeUninit<u8>>,
     buffer_pos: usize,
     buffer_len: usize,
-    block_size: i32,
+    block_size: usize,
 }
 
 impl<R> Bz3Decoder<R>
@@ -202,10 +176,10 @@ where
             return Err(Error::InvalidSignature);
         }
 
-        let block_size = reader.read_i32::<LE>()?;
-        let state = create_bz3_state(block_size);
+        let block_size = reader.read_i32::<LE>()? as usize;
+        let state = Bz3State::new(block_size)?;
 
-        let buffer_size = block_size as usize + block_size as usize / 50 + 32;
+        let buffer_size = block_size + block_size / 50 + 32;
         let buffer = init_buffer(buffer_size);
 
         Ok(Self {
@@ -219,7 +193,7 @@ where
     }
 
     /// The block size of the BZip3 stream.
-    pub fn block_size(&self) -> i32 {
+    pub fn block_size(&self) -> usize {
         self.block_size
     }
 
@@ -259,12 +233,10 @@ where
         self.reader.read_exact(&mut buffer[..(new_size as usize)])?;
 
         unsafe {
-            let result = bz3_decode_block(self.state, buffer.as_mut_ptr(), new_size, read_size);
+            let result = bz3_decode_block(self.state.raw, buffer.as_mut_ptr(), new_size, read_size);
             if result == -1 {
                 return Err(Error::ProcessBlock(
-                    CStr::from_ptr(bz3_strerror(self.state))
-                        .to_string_lossy()
-                        .into(),
+                    self.state.error().into()
                 ));
             }
         };
@@ -317,16 +289,5 @@ where
         }
         self.buffer_pos += required_length;
         Ok(required_length)
-    }
-}
-
-impl<R> Drop for Bz3Decoder<R>
-where
-    R: Read,
-{
-    fn drop(&mut self) {
-        unsafe {
-            bz3_free(self.state);
-        }
     }
 }
