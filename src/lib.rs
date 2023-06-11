@@ -16,9 +16,12 @@
 //! ```
 //! use std::io::Read;
 //! use bzip3::read::{Bz3Decoder, Bz3Encoder};
+//!
 //! let data = "hello, world".as_bytes();
-//! let mut  compressor = Bz3Encoder::new(data, 100 * 1024 /* 100 kiB */).unwrap();
-//! let mut  decompressor = Bz3Decoder::new(&mut compressor).unwrap();
+//! let block_size = 100 * 1024; // 100 kiB
+//!
+//! let mut compressor = Bz3Encoder::new(data, block_size).unwrap();
+//! let mut decompressor = Bz3Decoder::new(&mut compressor).unwrap();
 //!
 //! let mut contents = String::new();
 //! decompressor.read_to_string(&mut contents).unwrap();
