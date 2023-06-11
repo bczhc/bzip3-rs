@@ -92,7 +92,7 @@ fn test_read_based(data_size: usize, block_size: usize) {
     {
         let mut reader = Cursor::new(compressed);
         let mut decoder = read::Bz3Decoder::new(&mut reader).unwrap();
-        assert_eq!(decoder.block_size() as usize, block_size);
+        assert_eq!({ decoder.block_size() }, block_size);
         io::copy(&mut decoder, &mut uncompressed).unwrap();
     }
 

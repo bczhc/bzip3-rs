@@ -1,13 +1,12 @@
 //! Write-based BZip3 compressor and decompressor.
 
-use std::ffi::CStr;
 use std::io::{Cursor, Read, Write};
 use std::mem::{size_of, MaybeUninit};
 use std::{io, mem};
 
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 
-use libbzip3_sys::{bz3_decode_block, bz3_encode_block, bz3_strerror};
+use libbzip3_sys::{bz3_decode_block, bz3_encode_block};
 
 use crate::errors::*;
 use crate::{
@@ -66,9 +65,7 @@ where
                 data_size as i32,
             );
             if new_size == -1 {
-                return Err(Error::ProcessBlock(
-                    self.state.error().into()
-                ));
+                return Err(Error::ProcessBlock(self.state.error().into()));
             }
 
             self.writer.write_i32::<LE>(new_size)?;
@@ -208,9 +205,7 @@ where
                 block_header.read_size,
             );
             if result == -1 {
-                return Err(Error::ProcessBlock(
-                    state.error().into()
-                ));
+                return Err(Error::ProcessBlock(state.error().into()));
             }
             self.writer.write_all(
                 &mem::transmute::<_, &[u8]>(self.buffer.as_slice())

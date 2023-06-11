@@ -1,13 +1,12 @@
 //! Read-based BZip3 compressor and decompressor.
 
-use std::ffi::CStr;
 use std::io::{Cursor, ErrorKind, Read, Write};
 use std::mem::MaybeUninit;
 use std::{io, slice};
 
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 
-use libbzip3_sys::{bz3_decode_block, bz3_encode_block, bz3_free, bz3_strerror};
+use libbzip3_sys::{bz3_decode_block, bz3_encode_block};
 
 use crate::errors::*;
 use crate::{init_buffer, transmute_uninitialized_buffer, Bz3State, TryReadExact, MAGIC_NUMBER};
@@ -78,9 +77,7 @@ where
             let new_size =
                 bz3_encode_block(self.state.raw, data_buffer.as_mut_ptr(), read_size as i32);
             if new_size == -1 {
-                return Err(Error::ProcessBlock(
-                    self.state.error().into()
-                ));
+                return Err(Error::ProcessBlock(self.state.error().into()));
             }
 
             // go back and fill new_size and read_size
@@ -235,9 +232,7 @@ where
         unsafe {
             let result = bz3_decode_block(self.state.raw, buffer.as_mut_ptr(), new_size, read_size);
             if result == -1 {
-                return Err(Error::ProcessBlock(
-                    self.state.error().into()
-                ));
+                return Err(Error::ProcessBlock(self.state.error().into()));
             }
         };
 
