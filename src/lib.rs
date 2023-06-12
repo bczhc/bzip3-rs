@@ -26,8 +26,6 @@
 //! ```
 extern crate core;
 
-use std::mem;
-use std::mem::MaybeUninit;
 use std::{ffi::CStr, io::Read};
 
 use bytesize::ByteSize;
@@ -77,26 +75,6 @@ where
                 }
             }
         }
-    }
-}
-
-fn init_buffer(size: usize) -> Vec<MaybeUninit<u8>> {
-    let mut buffer = Vec::<MaybeUninit<u8>>::with_capacity(size);
-    unsafe {
-        buffer.set_len(size);
-    }
-    buffer
-}
-
-#[inline(always)]
-unsafe fn transmute_uninitialized_buffer(buffer: &mut [MaybeUninit<u8>]) -> &mut [u8] {
-    mem::transmute(buffer)
-}
-
-fn uninit_copy_from_slice(src: &[u8], dst: &mut [MaybeUninit<u8>]) {
-    unsafe {
-        let transmute: &[MaybeUninit<u8>] = mem::transmute(src);
-        dst.copy_from_slice(transmute);
     }
 }
 

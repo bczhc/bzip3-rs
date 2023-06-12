@@ -1,7 +1,6 @@
 //! Read-based BZip3 compressor and decompressor.
 
 use std::io::{Cursor, ErrorKind, Read, Write};
-use std::mem::MaybeUninit;
 use std::{io, slice};
 
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
@@ -9,7 +8,7 @@ use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use libbzip3_sys::{bz3_decode_block, bz3_encode_block};
 
 use crate::errors::*;
-use crate::{init_buffer, transmute_uninitialized_buffer, Bz3State, TryReadExact, MAGIC_NUMBER};
+use crate::{Bz3State, TryReadExact, MAGIC_NUMBER};
 
 pub struct Bz3Encoder<R>
 where
@@ -18,7 +17,7 @@ where
     state: Bz3State,
     reader: R,
     /// Temporary buffer for [`Read::read`]
-    buffer: Vec<MaybeUninit<u8>>,
+    buffer: Vec<u8>,
     buffer_pos: usize,
     buffer_len: usize,
     block_size: usize,
@@ -42,16 +41,13 @@ where
         let state = Bz3State::new(block_size)?;
 
         let buffer_size = block_size + block_size / 50 + 32 + MAGIC_NUMBER.len() + 4;
-        let mut buffer = Vec::<MaybeUninit<u8>>::with_capacity(buffer_size);
-        unsafe {
-            buffer.set_len(buffer_size);
-        }
+        let mut buffer = vec![0_u8; buffer_size];
 
         let mut header = Cursor::new(Vec::new());
         header.write_all(MAGIC_NUMBER).unwrap();
         header.write_i32::<LE>(block_size as i32).unwrap();
         for x in header.get_ref().iter().enumerate() {
-            buffer[x.0] = MaybeUninit::new(*x.1);
+            buffer[x.0] = *x.1;
         }
 
         Ok(Self {
@@ -163,7 +159,7 @@ where
     state: Bz3State,
     reader: R,
     /// Temporary buffer for [`Read::read`]
-    buffer: Vec<MaybeUninit<u8>>,
+    buffer: Vec<u8>,
     buffer_pos: usize,
     buffer_len: usize,
     block_size: usize,
@@ -198,7 +194,7 @@ where
         let state = Bz3State::new(block_size)?;
 
         let buffer_size = block_size + block_size / 50 + 32;
-        let buffer = init_buffer(buffer_size);
+        let buffer = vec![0_u8; buffer_size];
 
         Ok(Self {
             state,
@@ -248,7 +244,7 @@ where
 
         debug_assert!(self.buffer.len() >= read_size);
 
-        let buffer = unsafe { transmute_uninitialized_buffer(&mut self.buffer) };
+        let buffer = &mut self.buffer;
         self.reader.read_exact(&mut buffer[..(new_size as usize)])?;
 
         unsafe {

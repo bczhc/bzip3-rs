@@ -1,7 +1,7 @@
 //! Write-based BZip3 compressor and decompressor.
 
 use std::io::{Cursor, Read, Write};
-use std::mem::{size_of, MaybeUninit};
+use std::mem::size_of;
 use std::{io, mem};
 
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
@@ -9,9 +9,7 @@ use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use libbzip3_sys::{bz3_decode_block, bz3_encode_block};
 
 use crate::errors::*;
-use crate::{
-    init_buffer, transmute_uninitialized_buffer, uninit_copy_from_slice, Bz3State, MAGIC_NUMBER,
-};
+use crate::{Bz3State, MAGIC_NUMBER};
 
 pub struct Bz3Encoder<W>
 where
@@ -19,7 +17,7 @@ where
 {
     writer: W,
     state: Bz3State,
-    buffer: Vec<MaybeUninit<u8>>,
+    buffer: Vec<u8>,
     buffer_pos: usize,
     block_size: usize,
 }
@@ -43,7 +41,7 @@ where
         writer.write_all(header.get_ref())?;
 
         let buffer_size = block_size + block_size / 50 + 32;
-        let buffer = init_buffer(buffer_size as usize);
+        let buffer = vec![0; buffer_size as usize];
 
         Ok(Self {
             writer,
@@ -59,11 +57,8 @@ where
         let data_size = self.buffer_pos;
         debug_assert!(data_size <= self.block_size);
         unsafe {
-            let new_size = bz3_encode_block(
-                self.state.raw,
-                transmute_uninitialized_buffer(&mut self.buffer).as_mut_ptr(),
-                data_size as i32,
-            );
+            let new_size =
+                bz3_encode_block(self.state.raw, self.buffer.as_mut_ptr(), data_size as i32);
             if new_size == -1 {
                 return Err(Error::ProcessBlock(self.state.error().into()));
             }
@@ -99,10 +94,8 @@ where
             write_size = remaining_size;
         }
 
-        uninit_copy_from_slice(
-            &buf[..write_size],
-            &mut self.buffer[self.buffer_pos..(self.buffer_pos + write_size)],
-        );
+        self.buffer[self.buffer_pos..(self.buffer_pos + write_size)]
+            .copy_from_slice(&buf[..write_size]);
 
         self.buffer_pos += write_size;
 
@@ -131,7 +124,7 @@ where
 {
     writer: W,
     state: Option<Bz3State>,
-    buffer: Vec<MaybeUninit<u8>>,
+    buffer: Vec<u8>,
     buffer_pos: usize,
     header_len: usize,
     block_header_buf: [u8; BLOCK_HEADER_SIZE], /* (i32, i32) */
@@ -166,7 +159,7 @@ where
         Self {
             state: None, /* here can't get the block size */
             writer,
-            buffer: init_buffer(header_len), /* need header data to initialize first */
+            buffer: vec![0_u8; header_len], /* need header data to initialize first */
             buffer_pos: 0,
             header_len,
             block_header_buf: [0_u8; 8],
@@ -176,8 +169,7 @@ where
     }
 
     fn initialize(&mut self) -> Result<()> {
-        let buffer = unsafe { transmute_uninitialized_buffer(&mut self.buffer) };
-        let mut cursor = Cursor::new(buffer);
+        let mut cursor = Cursor::new(&mut self.buffer);
         let mut magic = [0_u8; MAGIC_NUMBER.len()];
         cursor.read_exact(&mut magic).unwrap();
         if &magic != MAGIC_NUMBER {
@@ -186,7 +178,7 @@ where
         let block_size = cursor.read_i32::<LE>().unwrap();
         // reinitialize the buffer
         let buffer_size = block_size + block_size / 50 + 32;
-        self.buffer = init_buffer(buffer_size as usize);
+        self.buffer = vec![0_u8; buffer_size as usize];
         self.state = Some(Bz3State::new(block_size as usize)?);
         Ok(())
     }
@@ -197,10 +189,9 @@ where
 
         let Some(block_header) = &self.block_header else { unreachable!() };
         unsafe {
-            let buffer = transmute_uninitialized_buffer(&mut self.buffer);
             let result = bz3_decode_block(
                 state.raw,
-                buffer.as_mut_ptr(),
+                self.buffer.as_mut_ptr(),
                 block_header.new_size,
                 block_header.read_size,
             );
@@ -228,10 +219,8 @@ where
             if write_size > needed_size {
                 write_size = needed_size;
             }
-            uninit_copy_from_slice(
-                &buf[..write_size],
-                &mut self.buffer[self.buffer_pos..(self.buffer_pos + write_size)],
-            );
+            self.buffer[self.buffer_pos..(self.buffer_pos + write_size)]
+                .copy_from_slice(&buf[..write_size]);
             self.buffer_pos += write_size;
             if self.buffer_pos == self.header_len {
                 // header prepared
@@ -269,10 +258,8 @@ where
             if write_size > needed_size {
                 write_size = needed_size;
             }
-            uninit_copy_from_slice(
-                &buf[..write_size],
-                &mut self.buffer[self.buffer_pos..(self.buffer_pos + write_size)],
-            );
+            self.buffer[self.buffer_pos..(self.buffer_pos + write_size)]
+                .copy_from_slice(&buf[..write_size]);
             self.buffer_pos += write_size;
             if self.buffer_pos == block_header.new_size as usize {
                 self.decompress_block().map_err(Error::into_io_error)?;
