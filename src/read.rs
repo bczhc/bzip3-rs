@@ -22,6 +22,11 @@ where
     buffer_pos: usize,
     buffer_len: usize,
     block_size: usize,
+    /// The underlying `reader` EOF indicator
+    ///
+    /// Its function is to ensure after EOF is
+    /// reached, all further `read` calls always receive zero "read_size"
+    eof: bool,
 }
 
 impl<R> Bz3Encoder<R>
@@ -56,6 +61,7 @@ where
             buffer_pos: 0,
             buffer_len: header.get_ref().len(), /* default buffer holds the header */
             block_size,
+            eof: false,
         })
     }
 
@@ -97,12 +103,26 @@ where
 {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if self.buffer_pos == self.buffer_len {
+            // when the underlying `reader` reaches EOF and also
+            // the buffer maintained by this struct is empty, it's all the end
+            if self.eof {
+                return Ok(0);
+            }
+
             // reset buffer position, and re-fill the buffer
             self.buffer_pos = 0;
             match self.compress_block() {
-                Ok(read_size) if read_size == 0 => {
-                    // EOF
-                    return Ok(0);
+                Ok(read_size) => {
+                    // `try_read_exact` defines this is reaching EOF
+                    // but still have some data
+                    if read_size < self.block_size {
+                        self.eof = true;
+                    }
+                    // also EOF and no more data to process; immediately end this `read` call
+                    if read_size == 0 {
+                        self.eof = true;
+                        return Ok(0);
+                    }
                 }
                 Err(Error::ProcessBlock(msg)) => {
                     return Err(io::Error::new(ErrorKind::Other, msg));
@@ -113,7 +133,6 @@ where
                 Err(_) => {
                     unreachable!();
                 }
-                _ => {}
             }
         }
 
@@ -148,6 +167,8 @@ where
     buffer_pos: usize,
     buffer_len: usize,
     block_size: usize,
+    /// Underlying `reader` EOF indicator
+    eof: bool,
 }
 
 impl<R> Bz3Decoder<R>
@@ -186,6 +207,7 @@ where
             buffer_len: 0,
             buffer,
             block_size,
+            eof: false,
         })
     }
 
@@ -201,7 +223,7 @@ where
     /// # Errors:
     ///
     /// Types: [`Error::ProcessBlock`], [`io::Error`]
-    fn decompress_block(&mut self) -> Result<i32> {
+    fn decompress_block(&mut self) -> Result<usize> {
         // Handle the block head. If there's no data to read, it reaches EOF of the bzip3 stream.
         let mut new_size_buf = [0_u8; 4];
         let len = self.reader.try_read_exact(&mut new_size_buf)?;
@@ -215,28 +237,33 @@ where
                 LE::read_i32(&new_size_buf)
             }
             _ => {
-                // corrupt stream
+                // unexpected EOF; corrupt stream
                 return Err(Error::Io(io::Error::new(
                     ErrorKind::UnexpectedEof,
                     "Corrupt file; insufficient block head info",
                 )));
             }
         };
-        let read_size = self.reader.read_i32::<LE>()?;
+        let read_size = self.reader.read_i32::<LE>()? as usize;
 
-        debug_assert!(self.buffer.len() >= read_size as usize);
+        debug_assert!(self.buffer.len() >= read_size);
 
         let buffer = unsafe { transmute_uninitialized_buffer(&mut self.buffer) };
         self.reader.read_exact(&mut buffer[..(new_size as usize)])?;
 
         unsafe {
-            let result = bz3_decode_block(self.state.raw, buffer.as_mut_ptr(), new_size, read_size);
+            let result = bz3_decode_block(
+                self.state.raw,
+                buffer.as_mut_ptr(),
+                new_size,
+                read_size as i32,
+            );
             if result == -1 {
                 return Err(Error::ProcessBlock(self.state.error().into()));
             }
         };
 
-        self.buffer_len = read_size as usize;
+        self.buffer_len = read_size;
         Ok(read_size)
     }
 }
@@ -247,12 +274,21 @@ where
 {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if self.buffer_pos == self.buffer_len {
+            if self.eof {
+                return Ok(0);
+            }
+
             self.buffer_pos = 0;
             // re-fill the buffer
             match self.decompress_block() {
-                Ok(size) if size == 0 => {
-                    // EOF
-                    return Ok(0);
+                Ok(size) => {
+                    // only can be zero. Because the decompression process requires
+                    // the full compressed data with `new_size` length being read,
+                    // and when this cannot meet, an error will occur in `decompress_block(...)`
+                    if size == 0 {
+                        self.eof = true;
+                        return Ok(0);
+                    }
                 }
                 Err(Error::ProcessBlock(msg)) => {
                     return Err(io::Error::new(ErrorKind::Other, msg));
@@ -260,8 +296,7 @@ where
                 Err(Error::Io(e)) => {
                     return Err(e);
                 }
-                Ok(_) => {}
-                _ => {
+                Err(_) => {
                     unreachable!();
                 }
             }
