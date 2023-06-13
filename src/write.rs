@@ -1,7 +1,6 @@
 //! Write-based BZip3 compressor and decompressor.
 
 use std::io::{Cursor, Read, Write};
-use std::mem::size_of;
 use std::{io, mem};
 
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
@@ -35,7 +34,7 @@ where
         let state = Bz3State::new(block_size)?;
         let block_size = block_size as i32;
 
-        let mut header = Cursor::new([0_u8; MAGIC_NUMBER.len() + size_of::<i32>()]);
+        let mut header = Cursor::new([0_u8; MAGIC_NUMBER.len() + 4 /* i32 */]);
         header.write_all(MAGIC_NUMBER).unwrap();
         header.write_i32::<LE>(block_size).unwrap();
         writer.write_all(header.get_ref())?;
@@ -116,7 +115,7 @@ where
     }
 }
 
-const BLOCK_HEADER_SIZE: usize = 2 * size_of::<i32>();
+const BLOCK_HEADER_SIZE: usize = 2 * 4 /* i32 */;
 
 pub struct Bz3Decoder<W>
 where
@@ -155,7 +154,7 @@ where
     W: Write,
 {
     pub fn new(writer: W) -> Self {
-        let header_len = MAGIC_NUMBER.len() + size_of::<i32>();
+        let header_len = MAGIC_NUMBER.len() + 4 /* i32 */;
         Self {
             state: None, /* here can't get the block size */
             writer,

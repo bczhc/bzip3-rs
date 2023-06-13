@@ -17,8 +17,8 @@
 //! use std::io::Read;
 //! use bzip3::read::{Bz3Decoder, Bz3Encoder};
 //! let data = "hello, world".as_bytes();
-//! let mut  compressor = Bz3Encoder::new(data, 100 * 1024 /* 100 kiB */).unwrap();
-//! let mut  decompressor = Bz3Decoder::new(&mut compressor).unwrap();
+//! let mut compressor = Bz3Encoder::new(data, 100 * 1024 /* 100 kiB */).unwrap();
+//! let mut decompressor = Bz3Decoder::new(&mut compressor).unwrap();
 //!
 //! let mut contents = String::new();
 //! decompressor.read_to_string(&mut contents).unwrap();
@@ -49,6 +49,8 @@ pub(crate) trait TryReadExact {
     ///
     /// When reaching EOF, the return value will be less than the size of the given buffer,
     /// or just zero.
+    ///
+    /// This simulates C function `fread`.
     fn try_read_exact(&mut self, buf: &mut [u8]) -> std::io::Result<usize>;
 }
 

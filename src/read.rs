@@ -1,6 +1,6 @@
 //! Read-based BZip3 compressor and decompressor.
 
-use std::io::{Cursor, ErrorKind, Read, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::{io, slice};
 
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
@@ -43,19 +43,17 @@ where
         let buffer_size = block_size + block_size / 50 + 32 + MAGIC_NUMBER.len() + 4;
         let mut buffer = vec![0_u8; buffer_size];
 
-        let mut header = Cursor::new(Vec::new());
+        let mut header = Vec::new();
         header.write_all(MAGIC_NUMBER).unwrap();
         header.write_i32::<LE>(block_size as i32).unwrap();
-        for x in header.get_ref().iter().enumerate() {
-            buffer[x.0] = *x.1;
-        }
+        buffer[..header.len()].copy_from_slice(&header);
 
         Ok(Self {
             state,
             reader,
             buffer,
             buffer_pos: 0,
-            buffer_len: header.get_ref().len(), /* default buffer holds the header */
+            buffer_len: header.len(), /* default buffer holds the header */
             block_size,
             eof: false,
         })
@@ -83,9 +81,9 @@ where
             }
 
             // go back and fill new_size and read_size
-            let mut cursor = Cursor::new(buffer);
-            cursor.write_i32::<LE>(new_size)?;
-            cursor.write_i32::<LE>(read_size as i32)?;
+            use byteorder::ByteOrder;
+            LE::write_i32(buffer, new_size);
+            LE::write_i32(&mut buffer[4..], read_size as i32);
 
             self.buffer_len = 4 + 4 + new_size as usize;
             Ok(read_size)
