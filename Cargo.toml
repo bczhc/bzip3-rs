@@ -1,7 +1,7 @@
 [package]
 name = "bzip3"
 authors = ["bczhc <bczhc0@126.com>"]
-version = "0.8.0"
+version = "0.8.1"
 edition = "2021"
 license = "LGPL-3.0-only"
 readme = "README.md"
@@ -19,7 +19,7 @@ members = ["libbzip3-sys"]
 thiserror = "1.0.38"
 byteorder = "1.4.3"
 bytesize = "1.1.0"
-libbzip3-sys = { path = "libbzip3-sys", version = "0.3.1+1.3.1" }
+libbzip3-sys = { path = "libbzip3-sys", version = "0.3.2+1.3.2" }
 
 [dev-dependencies]
 clap = "4.0.32"

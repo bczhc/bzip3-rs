@@ -9,4 +9,4 @@ This is a Rust wrapper for [bzip3](https://github.com/kspalaiologos/bzip3).
 ## Crate Features
 - bundled: use bundled libbzip3
 
-Current bundled bzip3 library version is [kspalaiologos/bzip3@1.3.1](https://github.com/kspalaiologos/bzip3/commit/b4478ccb8c6b9dfad144a9ee1f797335a59d9085).
+Current bundled bzip3 library version is [kspalaiologos/bzip3@1.3.2](https://github.com/kspalaiologos/bzip3/commit/e954b57125a40dc049121dc9e7c712f889b55a58).
