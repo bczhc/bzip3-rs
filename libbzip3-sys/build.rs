@@ -1,5 +1,3 @@
-#![feature(try_blocks)]
-
 extern crate bindgen;
 
 use cfg_if::cfg_if;
@@ -82,14 +80,17 @@ mod bundled {
         news_file.read_to_string(&mut read).unwrap();
         drop(news_file);
 
-        let version: Option<String> = try {
+        let version: Option<String> = {
             let version_regex = Regex::new(r#"^v([0-9]+\.[0-9]+\.[0-9]+):$"#).unwrap();
             let mut lines = read.lines();
-            let last = lines.rfind(|x| version_regex.is_match(x))?;
 
-            let version = version_regex.captures_iter(last).next()?.get(1)?.as_str();
-            version.into()
+            lines
+                .rfind(|x| version_regex.is_match(x))
+                .and_then(|last_line| version_regex.captures_iter(last_line).next())
+                .and_then(|last_line_captures| last_line_captures.get(1))
+                .map(|capture| capture.as_str().into())
         };
+
         version.expect("Cannot find library version from NEWS file")
     }
 
