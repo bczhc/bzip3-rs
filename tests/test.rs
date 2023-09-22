@@ -59,6 +59,36 @@ fn version() {
 }
 
 #[test]
+fn test_compressing_and_decompressing_small_input() {
+    // Input to be compressed and decompressed
+    let input: &[u8] = &[1, 2, 3];
+
+    let compressed = {
+        let mut output = vec![];
+        io::copy(
+            &mut &*input,
+            &mut write::Bz3Encoder::new(&mut output, 100 * KB).unwrap(),
+        )
+        .unwrap();
+
+        output
+    };
+
+    let decompressed = {
+        let mut output = vec![];
+        io::copy(
+            &mut read::Bz3Decoder::new(compressed.as_slice()).unwrap(),
+            &mut output,
+        )
+        .unwrap();
+
+        output
+    };
+
+    assert_eq!(input, decompressed);
+}
+
+#[test]
 fn test_chained_encoders_and_decoders_with_single_block() {
     // 100kb gets shrunk down to 22kb-24kb, so it fits in a single 70kb block
     let input = generate_deterministic_data(100 * KB);
