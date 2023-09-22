@@ -1,3 +1,5 @@
+extern crate core;
+
 use std::fmt::Write as _;
 use std::io::{self, Cursor, Read, Write};
 
@@ -81,6 +83,29 @@ fn test_compressing_and_decompressing_small_input() {
             &mut output,
         )
         .unwrap();
+
+        output
+    };
+
+    assert_eq!(input, decompressed);
+
+    // Input to be compressed and decompressed
+    let input: &[u8] = &[1, 2, 3];
+
+    let compressed = {
+        let mut output = vec![];
+        io::copy(
+            &mut read::Bz3Encoder::new(input, 100 * KB).unwrap(),
+            &mut output,
+        )
+        .unwrap();
+
+        output
+    };
+
+    let decompressed = {
+        let mut output = vec![];
+        io::copy(&mut &*compressed, &mut write::Bz3Decoder::new(&mut output)).unwrap();
 
         output
     };

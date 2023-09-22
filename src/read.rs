@@ -99,6 +99,7 @@ where
         if self.buffer_pos == self.buffer_len {
             // when the underlying `reader` reaches EOF and also
             // the buffer maintained by this struct is empty, it's all the end
+            // TODO: inconsistency EOF mark with `read::Bz3Decoder`
             if self.eof {
                 return Ok(0);
             }
@@ -267,11 +268,10 @@ where
     R: Read,
 {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if self.eof {
+            return Ok(0);
+        }
         if self.buffer_pos == self.buffer_len {
-            if self.eof {
-                return Ok(0);
-            }
-
             self.buffer_pos = 0;
             // re-fill the buffer
             match self.decompress_block() {
