@@ -4,6 +4,7 @@ use std::fmt::Write as _;
 use std::io::{self, Cursor, Read, Write};
 
 use bytesize::ByteSize;
+use hex_literal::hex;
 use rand::{thread_rng, RngCore};
 use regex::Regex;
 
@@ -141,6 +142,38 @@ fn test_chained_encoders_and_decoders_with_multiple_blocks() {
 
     drop(writer);
     assert_eq!(input, output);
+}
+
+#[test]
+fn decode_empty_blocks() {
+    let empty_block = hex!("0800 0000 0000 0000 0100 0000 ffff ffff");
+    let data_block = hex!(
+        "0d00000005000000d5a212e7ffffffff68656c6c6f
+"
+    );
+    let block_size = hex!("0000 0001");
+    let mut archive: Vec<u8> = Vec::new();
+    archive.write_all(bzip3::MAGIC_NUMBER).unwrap();
+    archive.write_all(&block_size).unwrap();
+    for _ in 0..10 {
+        archive.write_all(&empty_block).unwrap();
+    }
+    archive.write_all(&data_block).unwrap();
+    archive.write_all(&empty_block).unwrap();
+    archive.write_all(&data_block).unwrap();
+
+    // read-based
+    let decoder = read::Bz3Decoder::new(archive.as_slice()).unwrap();
+    assert_eq!(io::read_to_string(decoder).unwrap(), "hellohello");
+
+    // write-based
+    let mut writer = Cursor::new(Vec::new());
+    let mut decoder = write::Bz3Decoder::new(&mut writer);
+    io::copy(&mut Cursor::new(archive), &mut decoder).unwrap();
+    assert_eq!(
+        String::from_utf8(writer.into_inner()).unwrap(),
+        "hellohello"
+    );
 }
 
 fn create_encoder_chain<'a>(

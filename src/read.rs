@@ -213,19 +213,19 @@ where
 
     /// Decompress and fill the buffer.
     ///
-    /// Returns the original data size. Zero indicates a normal EOF.
+    /// Returns EOF flag: true indicates EOF
     ///
     /// # Errors:
     ///
     /// Types: [`Error::ProcessBlock`], [`io::Error`]
-    fn decompress_block(&mut self) -> Result<usize> {
+    fn decompress_block(&mut self) -> Result<bool> {
         // Handle the block head. If there's no data to read, it reaches EOF of the bzip3 stream.
         let mut new_size_buf = [0_u8; 4];
         let len = self.reader.try_read_exact(&mut new_size_buf)?;
         let new_size = match len {
             0 => {
                 // a normal EOF
-                return Ok(0);
+                return Ok(true);
             }
             4 => {
                 use byteorder::ByteOrder;
@@ -259,7 +259,33 @@ where
         };
 
         self.buffer_len = read_size;
-        Ok(read_size)
+        Ok(false)
+    }
+
+    /// Decompress next block, but skip empty blocks.
+    ///
+    /// Currently, `decompress_block` will be called (once and only once)
+    /// on each `read` call,
+    /// and if it meets an empty block, `self.buffer_len` will be zero.
+    /// Thus, the `Read::read` function will return zero which means
+    /// the stream reaches EOF, but actually it doesn't.
+    ///
+    /// Returns EOF flag; true indicates EOF
+    fn decompress_next_nonempty_block(&mut self) -> Result<bool> {
+        // use loop to skip empty blocks
+        // one empty block has a `read_size` of zero
+        // Example stream:
+        // 00000000: 0800 0000 0000 0000 0100 0000 ffff ffff  ................
+        loop {
+            let eof = self.decompress_block()?;
+            if eof {
+                return Ok(true);
+            }
+            if self.buffer_len /* the `read_size` */ == 0 {
+                continue;
+            }
+            return Ok(false);
+        }
     }
 }
 
@@ -274,15 +300,11 @@ where
         if self.buffer_pos == self.buffer_len {
             self.buffer_pos = 0;
             // re-fill the buffer
-            match self.decompress_block() {
-                Ok(size) => {
-                    // only can be zero. Because the decompression process requires
-                    // the full compressed data with `new_size` length being read,
-                    // and when this cannot meet, an error will occur in `decompress_block(...)`
-                    if size == 0 {
-                        self.eof = true;
-                        return Ok(0);
-                    }
+            match self.decompress_next_nonempty_block() {
+                Ok(false) => {}
+                Ok(true) => {
+                    self.eof = true;
+                    return Ok(0);
                 }
                 Err(Error::ProcessBlock(msg)) => {
                     return Err(io::Error::new(ErrorKind::Other, msg));

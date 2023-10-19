@@ -27,6 +27,7 @@ anyhow = "1.0.68"
 rand = "0.8.5"
 regex = "1.7.1"
 rayon = "1.7.0"
+hex-literal = "0.4.1"
 
 [features]
 bundled = ["libbzip3-sys/bundled"]

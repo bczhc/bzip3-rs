@@ -9,7 +9,8 @@
 //! Structure of each block:
 //! \[ new size (i32) | read size (i32) | data \]
 //!
-//! `new size` is the data size after compression, and `read size` is the original data size.
+//! Due to the naming from the original bzip3 library,
+//! `new size` indicates the data size after compression, and `read size` indicates the original data size.
 //!
 //! # Examples
 //!
