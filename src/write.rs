@@ -186,7 +186,9 @@ where
         let state = self.state.as_mut();
         let state = state.unwrap();
 
-        let Some(block_header) = &self.block_header else { unreachable!() };
+        let Some(block_header) = &self.block_header else {
+            unreachable!()
+        };
         unsafe {
             let result = bz3_decode_block(
                 state.raw,

@@ -56,7 +56,7 @@ fn test() {
 #[test]
 fn version() {
     let version = bzip3::version();
-    assert!(Regex::new(r#"^[0-9]+\.[0-9]+\.[0-9]+$"#)
+    assert!(Regex::new(r"^[0-9]+\.[0-9]+\.[0-9]+$")
         .unwrap()
         .is_match(version));
 }

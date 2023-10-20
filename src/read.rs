@@ -63,8 +63,7 @@ where
     /// Return the size read from `self.reader`; zero indicates EOF.
     fn compress_block(&mut self) -> Result<usize> {
         unsafe {
-            let buffer =
-                slice::from_raw_parts_mut(self.buffer.as_mut_ptr() as *mut u8, self.buffer.len());
+            let buffer = slice::from_raw_parts_mut(self.buffer.as_mut_ptr(), self.buffer.len());
 
             // structure of a block: [ new_size (i32) | read_size (i32) | compressed data ]
             // skip 8 bytes to write the buffer first
@@ -141,10 +140,8 @@ where
         }
 
         unsafe {
-            buf.as_mut_ptr().copy_from(
-                self.buffer[self.buffer_pos..].as_ptr() as *const u8,
-                required_length,
-            );
+            buf.as_mut_ptr()
+                .copy_from(self.buffer[self.buffer_pos..].as_ptr(), required_length);
         }
         self.buffer_pos += required_length;
         Ok(required_length)
@@ -328,10 +325,8 @@ where
         }
 
         unsafe {
-            buf.as_mut_ptr().copy_from(
-                self.buffer[self.buffer_pos..].as_ptr() as *const u8,
-                required_length,
-            );
+            buf.as_mut_ptr()
+                .copy_from(self.buffer[self.buffer_pos..].as_ptr(), required_length);
         }
         self.buffer_pos += required_length;
         Ok(required_length)
