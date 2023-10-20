@@ -13,7 +13,7 @@ use bzip3::{read, write};
 const KB: usize = 1024;
 
 #[test]
-fn test() {
+fn compress_and_decompress_parallel() {
     let test_size_array = [
         0_usize,
         1,
