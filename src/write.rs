@@ -32,25 +32,25 @@ where
     /// This returns [`Error::BlockSize`] if the block size is invalid.
     pub fn new(mut writer: W, block_size: usize) -> Result<Self> {
         let state = Bz3State::new(block_size)?;
-        let block_size = block_size as i32;
 
         let mut header = Cursor::new([0_u8; MAGIC_NUMBER.len() + 4 /* i32 */]);
         header.write_all(MAGIC_NUMBER).unwrap();
-        header.write_i32::<LE>(block_size).unwrap();
+        header.write_i32::<LE>(block_size as i32).unwrap();
         writer.write_all(header.get_ref())?;
 
         let buffer_size = block_size + block_size / 50 + 32;
-        let buffer = vec![0; buffer_size as usize];
+        let buffer = vec![0; buffer_size];
 
         Ok(Self {
             writer,
             state,
             buffer,
             buffer_pos: 0,
-            block_size: block_size as usize,
+            block_size,
         })
     }
 
+    /// Compress up to a whole block and write to `self.writer`.
     fn compress_block(&mut self) -> Result<()> {
         // self.buffer_pos as the size of data available to be compressed
         let data_size = self.buffer_pos;
@@ -109,7 +109,9 @@ where
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        self.compress_block().map_err(Error::into_io_error)?;
+        if self.buffer_pos != 0 {
+            self.compress_block().map_err(Error::into_io_error)?;
+        }
         self.buffer_pos = 0;
         Ok(())
     }

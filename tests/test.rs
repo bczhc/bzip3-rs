@@ -3,12 +3,12 @@ extern crate core;
 use std::fmt::Write as _;
 use std::io::{self, Cursor, Read, Write};
 
-use bytesize::ByteSize;
+use bytesize::{ByteSize, MIB};
 use hex_literal::hex;
 use rand::{thread_rng, RngCore};
 use regex::Regex;
 
-use bzip3::{read, write};
+use bzip3::{read, write, MAGIC_NUMBER};
 
 const KB: usize = 1024;
 
@@ -145,21 +145,42 @@ fn test_chained_encoders_and_decoders_with_multiple_blocks() {
 }
 
 #[test]
+fn avoid_creating_empty_blocks_by_flush_calls() {
+    let mut buf = Vec::new();
+    let mut encoder = write::Bz3Encoder::new(&mut buf, 16 * MIB as usize).unwrap();
+    encoder.flush().unwrap();
+    encoder.flush().unwrap();
+    encoder.flush().unwrap();
+    encoder.flush().unwrap();
+    drop(encoder);
+    assert_eq!(buf, {
+        let mut vec = Vec::from(*MAGIC_NUMBER);
+        vec.extend_from_slice(&hex!("00000001"));
+        vec
+    });
+
+    let mut buf = Vec::new();
+    let mut encoder = write::Bz3Encoder::new(&mut buf, 16 * MIB as usize).unwrap();
+    encoder.flush().unwrap();
+    encoder.write_all(b"hello").unwrap();
+    drop(encoder);
+    assert_eq!(find_subsequence(&buf, &EMPTY_BLOCK), None);
+}
+
+const EMPTY_BLOCK: [u8; 16] = hex!("0800 0000 0000 0000 0100 0000 ffff ffff");
+
+#[test]
 fn decode_empty_blocks() {
-    let empty_block = hex!("0800 0000 0000 0000 0100 0000 ffff ffff");
-    let data_block = hex!(
-        "0d00000005000000d5a212e7ffffffff68656c6c6f
-"
-    );
     let block_size = hex!("0000 0001");
+    let data_block = hex!("0d00000005000000d5a212e7ffffffff68656c6c6f");
     let mut archive: Vec<u8> = Vec::new();
     archive.write_all(bzip3::MAGIC_NUMBER).unwrap();
     archive.write_all(&block_size).unwrap();
     for _ in 0..10 {
-        archive.write_all(&empty_block).unwrap();
+        archive.write_all(&EMPTY_BLOCK).unwrap();
     }
     archive.write_all(&data_block).unwrap();
-    archive.write_all(&empty_block).unwrap();
+    archive.write_all(&EMPTY_BLOCK).unwrap();
     archive.write_all(&data_block).unwrap();
 
     // read-based
@@ -265,4 +286,10 @@ fn generate_deterministic_data(size: usize) -> Vec<u8> {
 
     string.truncate(size);
     string.into_bytes()
+}
+
+fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
 }
