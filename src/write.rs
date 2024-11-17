@@ -1,14 +1,14 @@
 //! Write-based BZip3 compressor and decompressor.
 
+use std::io;
 use std::io::{Cursor, Read, Write};
-use std::{io, mem};
 
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 
 use libbzip3_sys::{bz3_decode_block, bz3_encode_block};
 
 use crate::errors::*;
-use crate::{Bz3State, MAGIC_NUMBER};
+use crate::{bound, Bz3State, BLOCK_SIZE_MAX, BLOCK_SIZE_MIN, MAGIC_NUMBER};
 
 pub struct Bz3Encoder<W>
 where
@@ -25,7 +25,9 @@ impl<W> Bz3Encoder<W>
 where
     W: Write,
 {
-    /// The block size must be between 65kiB and 511MiB.
+    /// Creates a new bzip3 stream encoder.
+    ///
+    /// Valid block size is between [`BLOCK_SIZE_MIN`] and [`BLOCK_SIZE_MAX`] bytes.
     ///
     /// # Errors
     ///
@@ -38,7 +40,7 @@ where
         header.write_i32::<LE>(block_size as i32).unwrap();
         writer.write_all(header.get_ref())?;
 
-        let buffer_size = block_size + block_size / 50 + 32;
+        let buffer_size = bound(block_size);
         let buffer = vec![0; buffer_size];
 
         Ok(Self {
@@ -50,7 +52,7 @@ where
         })
     }
 
-    /// Compress up to a whole block and write to `self.writer`.
+    /// Compresses up to a whole block and write to `self.writer`.
     fn compress_block(&mut self) -> Result<()> {
         // self.buffer_pos as the size of data available to be compressed
         let data_size = self.buffer_pos;
@@ -128,8 +130,8 @@ where
     header_len: usize,
     block_header_buf: [u8; BLOCK_HEADER_SIZE], /* (i32, i32) */
     block_header_buf_pos: usize,
-    /// if present, the block header has been read, and this decoder now is waiting
-    /// for reading the block data
+    /// If present, the block header has been read, and this decoder now is waiting
+    /// for reading the block data.
     block_header: Option<BlockHeader>,
 }
 
@@ -156,9 +158,9 @@ where
     pub fn new(writer: W) -> Self {
         let header_len = MAGIC_NUMBER.len() + 4 /* i32 */;
         Self {
-            state: None, /* here can't get the block size */
+            state: None, /* can't initialize Bz3State; block size hasn't been read */
             writer,
-            buffer: vec![0_u8; header_len], /* need header data to initialize first */
+            buffer: vec![0_u8; header_len], /* a minimum space for reading magic/header first */
             buffer_pos: 0,
             header_len,
             block_header_buf: [0_u8; 8],
@@ -174,11 +176,11 @@ where
         if &magic != MAGIC_NUMBER {
             return Err(Error::InvalidSignature);
         }
-        let block_size = cursor.read_i32::<LE>().unwrap();
+        let block_size = cursor.read_i32::<LE>().unwrap() as usize;
         // reinitialize the buffer
-        let buffer_size = block_size + block_size / 50 + 32;
-        self.buffer = vec![0_u8; buffer_size as usize];
-        self.state = Some(Bz3State::new(block_size as usize)?);
+        let buffer_size = bound(block_size);
+        self.buffer = vec![0_u8; buffer_size];
+        self.state = Some(Bz3State::new(block_size)?);
         Ok(())
     }
 

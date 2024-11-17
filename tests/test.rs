@@ -8,7 +8,7 @@ use hex_literal::hex;
 use rand::{thread_rng, RngCore};
 use regex::Regex;
 
-use bzip3::{read, write, MAGIC_NUMBER};
+use bzip3::{read, write, Bz3State, BLOCK_SIZE_MAX, BLOCK_SIZE_MIN, MAGIC_NUMBER};
 
 const KB: usize = 1024;
 
@@ -292,4 +292,12 @@ fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack
         .windows(needle.len())
         .position(|window| window == needle)
+}
+
+#[test]
+fn block_size() {
+    assert!(Bz3State::new(BLOCK_SIZE_MIN).is_ok());
+    assert!(Bz3State::new(BLOCK_SIZE_MAX).is_ok());
+    assert!(Bz3State::new(BLOCK_SIZE_MIN - 1).is_err());
+    assert!(Bz3State::new(BLOCK_SIZE_MAX + 1).is_err());
 }

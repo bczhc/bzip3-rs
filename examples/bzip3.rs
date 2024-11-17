@@ -1,4 +1,3 @@
-use std::ffi::CStr;
 use std::io;
 use std::io::{stdin, stdout, BufWriter};
 use std::str::FromStr;
@@ -6,13 +5,10 @@ use std::str::FromStr;
 use bytesize::ByteSize;
 use clap::{Arg, ArgAction, Command};
 
-use bzip3::write;
+use bzip3::{version, write};
 
 fn main() -> anyhow::Result<()> {
-    let version = unsafe { CStr::from_ptr(libbzip3_sys::bz3_version()) }
-        .to_str()
-        .unwrap();
-    eprintln!("Bzip3 version: {}", version);
+    eprintln!("Bzip3 version: {}", version());
 
     let matches = Command::new("bzip3")
         .arg(

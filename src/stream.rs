@@ -1,5 +1,5 @@
 //! BZip3 compressor and decompressor
-//! that do a direct stream-to-stream process
+//! that do a direct stream-to-stream process.
 use std::io;
 use std::io::{Read, Write};
 

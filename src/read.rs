@@ -8,7 +8,7 @@ use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use libbzip3_sys::{bz3_decode_block, bz3_encode_block};
 
 use crate::errors::*;
-use crate::{Bz3State, TryReadExact, MAGIC_NUMBER};
+use crate::{bound, Bz3State, TryReadExact, BLOCK_SIZE_MAX, BLOCK_SIZE_MIN, MAGIC_NUMBER};
 
 pub struct Bz3Encoder<R>
 where
@@ -16,15 +16,15 @@ where
 {
     state: Bz3State,
     reader: R,
-    /// Temporary buffer for [`Read::read`]
+    /// Temporary buffer for [`Read::read`].
     buffer: Vec<u8>,
     buffer_pos: usize,
     buffer_len: usize,
     block_size: usize,
-    /// The underlying `reader` EOF indicator
+    /// The underlying `reader` EOF indicator.
     ///
-    /// Its function is to ensure after EOF is
-    /// reached, all further `read` calls always receive zero "read_size"
+    /// Its function is to ensure that, after EOF is
+    /// reached, all further `read` calls emit zero read size return-value.
     eof: bool,
 }
 
@@ -32,7 +32,9 @@ impl<R> Bz3Encoder<R>
 where
     R: Read,
 {
-    /// The block size must be between 65kiB and 511MiB.
+    /// Creates a new read-based bzip3 encoder.
+    ///
+    /// Valid block size is between [`BLOCK_SIZE_MIN`] and [`BLOCK_SIZE_MAX`] bytes.
     ///
     /// # Errors
     ///
@@ -40,7 +42,7 @@ where
     pub fn new(reader: R, block_size: usize) -> Result<Self> {
         let state = Bz3State::new(block_size)?;
 
-        let buffer_size = block_size + block_size / 50 + 32 + MAGIC_NUMBER.len() + 4;
+        let buffer_size = bound(block_size) + MAGIC_NUMBER.len() + 4;
         let mut buffer = vec![0_u8; buffer_size];
 
         let mut header = Vec::new();
@@ -60,6 +62,7 @@ where
     }
 
     /// Compress and fill the buffer.
+    ///
     /// Return the size read from `self.reader`; zero indicates EOF.
     fn compress_block(&mut self) -> Result<usize> {
         unsafe {
@@ -154,12 +157,12 @@ where
 {
     state: Bz3State,
     reader: R,
-    /// Temporary buffer for [`Read::read`]
+    /// Temporary buffer for [`Read::read`].
     buffer: Vec<u8>,
     buffer_pos: usize,
     buffer_len: usize,
     block_size: usize,
-    /// Underlying `reader` EOF indicator
+    /// Underlying `reader` EOF indicator.
     eof: bool,
 }
 
@@ -167,13 +170,12 @@ impl<R> Bz3Decoder<R>
 where
     R: Read,
 {
-    /// Create a BZIP3 decoder.
+    /// Creates a read-based bzip3 decoder.
     ///
     /// # Errors
     ///
-    /// When creating, this function reads the bzip3 header
-    /// from `reader`, and checks it. Error types are
-    /// [`io::Error`] and [`Error::InvalidSignature`].
+    /// [`Error::InvalidSignature`] for invalid file header signature, and
+    /// [`Error::Io`] on all IO errors.
     pub fn new(mut reader: R) -> Result<Self> {
         let mut signature = [0_u8; MAGIC_NUMBER.len()];
         let result = reader.read_exact(&mut signature);
@@ -189,7 +191,7 @@ where
         let block_size = reader.read_i32::<LE>()? as usize;
         let state = Bz3State::new(block_size)?;
 
-        let buffer_size = block_size + block_size / 50 + 32;
+        let buffer_size = bound(block_size);
         let buffer = vec![0_u8; buffer_size];
 
         Ok(Self {
@@ -203,14 +205,14 @@ where
         })
     }
 
-    /// The block size of the BZip3 stream.
+    /// Returns the bzip3 block size associated with the current state.
     pub fn block_size(&self) -> usize {
         self.block_size
     }
 
     /// Decompress and fill the buffer.
     ///
-    /// Returns EOF flag: true indicates EOF
+    /// Returning true indicates EOF.
     ///
     /// # Errors:
     ///
@@ -259,7 +261,7 @@ where
         Ok(false)
     }
 
-    /// Decompress next block, but skip empty blocks.
+    /// Decompresses the next block, but skips empty blocks.
     ///
     /// Currently, `decompress_block` will be called (once and only once)
     /// on each `read` call,

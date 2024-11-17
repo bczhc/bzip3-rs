@@ -10,7 +10,8 @@
 //! \[ new size (i32) | read size (i32) | data \]
 //!
 //! Due to the naming from the original bzip3 library,
-//! `new size` indicates the data size after compression, and `read size` indicates the original data size.
+//! `new size` indicates the data size after compression, and `read size` indicates the original
+//! data size.
 //!
 //! # Examples
 //!
@@ -32,9 +33,9 @@ extern crate core;
 
 use std::{ffi::CStr, io::Read};
 
-use bytesize::ByteSize;
+use bytesize::{KIB, MIB};
 
-use libbzip3_sys::{bz3_free, bz3_new, bz3_state, bz3_strerror};
+use libbzip3_sys::{bz3_bound, bz3_free, bz3_new, bz3_state, bz3_strerror};
 
 pub mod errors;
 pub mod read;
@@ -42,8 +43,14 @@ pub mod stream;
 pub mod write;
 pub use errors::{Error, Result};
 
-/// The signature of a bzip3 file.
+/// Signature of a bzip3 file.
 pub const MAGIC_NUMBER: &[u8; 5] = b"BZ3v1";
+
+/// Minimum block size.
+pub const BLOCK_SIZE_MIN: usize = 65 * KIB as usize;
+
+/// Maximum block size.
+pub const BLOCK_SIZE_MAX: usize = 511 * MIB as usize;
 
 pub(crate) trait TryReadExact {
     /// Read exact data
@@ -84,29 +91,48 @@ where
     }
 }
 
+/// Version of the underlying bzip3 library.
 pub fn version() -> &'static str {
+    // SAFETY: `bz3_version` from the C lib is supposed to return a static string.
     unsafe { CStr::from_ptr(libbzip3_sys::bz3_version()) }
         .to_str()
         .expect("Invalid UTF-8")
 }
 
+/// Returns the recommended output buffer size for the compression function.
+pub fn bound(input: usize) -> usize {
+    unsafe {
+        // SAFETY: only performs an arithmetic calculation
+        bz3_bound(input)
+    }
+}
+
+/// Wrapper for the raw Bz3State.
 pub struct Bz3State {
     raw: *mut bz3_state,
 }
 
 impl Bz3State {
+    #[inline]
     pub fn from_raw(state: *mut bz3_state) -> Bz3State {
         Bz3State { raw: state }
     }
 
+    #[inline]
+    fn check_block_size(size: usize) -> bool {
+        matches!(size, BLOCK_SIZE_MIN..=BLOCK_SIZE_MAX)
+    }
+
+    /// Creates a new Bz3State.
     pub fn new(block_size: usize) -> Result<Self> {
-        if block_size < ByteSize::kib(65).0 as usize || block_size > ByteSize::mib(511).0 as usize {
+        if !Self::check_block_size(block_size) {
             return Err(Error::BlockSize);
         }
 
         unsafe {
             let state = bz3_new(block_size as i32);
             if state.is_null() {
+                // This is fatal. Don't propagate it and just panic.
                 panic!("Allocation fails");
             }
             Ok(Self::from_raw(state))
@@ -120,7 +146,7 @@ impl Bz3State {
 
     pub fn error(&mut self) -> &'static str {
         unsafe {
-            // in bzip3 source code, this returns static string literals
+            // SAFETY: in bzip3 source code, this returns static string literals
             CStr::from_ptr(bz3_strerror(self.raw))
                 .to_str()
                 .expect("Invalid UTF-8")
