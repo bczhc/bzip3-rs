@@ -64,9 +64,7 @@ where
 
             self.writer.write_i32::<LE>(new_size)?;
             self.writer.write_i32::<LE>(data_size as i32)?;
-            self.writer.write_all(
-                &mem::transmute::<_, &[u8]>(self.buffer.as_slice())[..new_size as usize],
-            )?;
+            self.writer.write_all(&self.buffer[..new_size as usize])?;
         }
         Ok(())
     }
@@ -201,10 +199,8 @@ where
             if result == -1 {
                 return Err(Error::ProcessBlock(state.error().into()));
             }
-            self.writer.write_all(
-                &mem::transmute::<_, &[u8]>(self.buffer.as_slice())
-                    [..block_header.read_size as usize],
-            )?;
+            self.writer
+                .write_all(&self.buffer[..block_header.read_size as usize])?;
         }
         Ok(())
     }
