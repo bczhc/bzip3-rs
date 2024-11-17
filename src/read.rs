@@ -142,10 +142,8 @@ where
             required_length = remaining_size;
         }
 
-        unsafe {
-            buf.as_mut_ptr()
-                .copy_from(self.buffer[self.buffer_pos..].as_ptr(), required_length);
-        }
+        buf[..required_length]
+            .copy_from_slice(&self.buffer[self.buffer_pos..(self.buffer_pos + required_length)]);
         self.buffer_pos += required_length;
         Ok(required_length)
     }
@@ -326,10 +324,8 @@ where
             required_length = remaining_size;
         }
 
-        unsafe {
-            buf.as_mut_ptr()
-                .copy_from(self.buffer[self.buffer_pos..].as_ptr(), required_length);
-        }
+        buf[..required_length]
+            .copy_from_slice(&self.buffer[self.buffer_pos..(self.buffer_pos + required_length)]);
         self.buffer_pos += required_length;
         Ok(required_length)
     }
