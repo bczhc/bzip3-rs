@@ -5,8 +5,6 @@ use std::io::{Cursor, Read, Write};
 
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 
-use libbzip3_sys::{bz3_decode_block, bz3_encode_block};
-
 use crate::errors::*;
 use crate::{bound, Bz3State, BLOCK_SIZE_MAX, BLOCK_SIZE_MIN, MAGIC_NUMBER};
 
@@ -57,17 +55,10 @@ where
         // self.buffer_pos as the size of data available to be compressed
         let data_size = self.buffer_pos;
         debug_assert!(data_size <= self.block_size);
-        unsafe {
-            let new_size =
-                bz3_encode_block(self.state.raw, self.buffer.as_mut_ptr(), data_size as i32);
-            if new_size == -1 {
-                return Err(Error::ProcessBlock(self.state.error().into()));
-            }
-
-            self.writer.write_i32::<LE>(new_size)?;
-            self.writer.write_i32::<LE>(data_size as i32)?;
-            self.writer.write_all(&self.buffer[..new_size as usize])?;
-        }
+        let new_size = self.state.encode_block(&mut self.buffer, data_size)?;
+        self.writer.write_i32::<LE>(new_size as i32)?;
+        self.writer.write_i32::<LE>(data_size as i32)?;
+        self.writer.write_all(&self.buffer[..new_size])?;
         Ok(())
     }
 }
@@ -191,19 +182,13 @@ where
         let Some(block_header) = &self.block_header else {
             unreachable!()
         };
-        unsafe {
-            let result = bz3_decode_block(
-                state.raw,
-                self.buffer.as_mut_ptr(),
-                block_header.new_size,
-                block_header.read_size,
-            );
-            if result == -1 {
-                return Err(Error::ProcessBlock(state.error().into()));
-            }
-            self.writer
-                .write_all(&self.buffer[..block_header.read_size as usize])?;
-        }
+        state.decode_block(
+            &mut self.buffer,
+            block_header.new_size as _,
+            block_header.read_size as _,
+        )?;
+        self.writer
+            .write_all(&self.buffer[..block_header.read_size as usize])?;
         Ok(())
     }
 }

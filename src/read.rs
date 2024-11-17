@@ -1,11 +1,9 @@
 //! Read-based BZip3 compressor and decompressor.
 
+use std::io;
 use std::io::{ErrorKind, Read, Write};
-use std::{io, slice};
 
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
-
-use libbzip3_sys::{bz3_decode_block, bz3_encode_block};
 
 use crate::errors::*;
 use crate::{bound, Bz3State, TryReadExact, BLOCK_SIZE_MAX, BLOCK_SIZE_MIN, MAGIC_NUMBER};
@@ -65,31 +63,25 @@ where
     ///
     /// Return the size read from `self.reader`; zero indicates EOF.
     fn compress_block(&mut self) -> Result<usize> {
-        unsafe {
-            let buffer = slice::from_raw_parts_mut(self.buffer.as_mut_ptr(), self.buffer.len());
+        let buffer = &mut self.buffer[..];
 
-            // structure of a block: [ new_size (i32) | read_size (i32) | compressed data ]
-            // skip 8 bytes to write the buffer first
-            let data_buffer = &mut buffer[8..];
+        // structure of a block: [ new_size (i32) | read_size (i32) | compressed data ]
+        // skip 8 bytes to write the buffer first
+        let data_buffer = &mut buffer[8..];
 
-            let read_size = self
-                .reader
-                .try_read_exact(&mut data_buffer[..self.block_size])?;
+        let read_size = self
+            .reader
+            .try_read_exact(&mut data_buffer[..self.block_size])?;
 
-            let new_size =
-                bz3_encode_block(self.state.raw, data_buffer.as_mut_ptr(), read_size as i32);
-            if new_size == -1 {
-                return Err(Error::ProcessBlock(self.state.error().into()));
-            }
+        let new_size = self.state.encode_block(data_buffer, read_size)?;
 
-            // go back and fill new_size and read_size
-            use byteorder::ByteOrder;
-            LE::write_i32(buffer, new_size);
-            LE::write_i32(&mut buffer[4..], read_size as i32);
+        // go back and fill new_size and read_size
+        use byteorder::ByteOrder;
+        LE::write_i32(buffer, new_size as i32);
+        LE::write_i32(&mut buffer[4..], read_size as i32);
 
-            self.buffer_len = 4 + 4 + new_size as usize;
-            Ok(read_size)
-        }
+        self.buffer_len = 4 + 4 + new_size;
+        Ok(read_size)
     }
 }
 
@@ -243,17 +235,8 @@ where
         let buffer = &mut self.buffer;
         self.reader.read_exact(&mut buffer[..(new_size as usize)])?;
 
-        unsafe {
-            let result = bz3_decode_block(
-                self.state.raw,
-                buffer.as_mut_ptr(),
-                new_size,
-                read_size as i32,
-            );
-            if result == -1 {
-                return Err(Error::ProcessBlock(self.state.error().into()));
-            }
-        };
+        self.state
+            .decode_block(buffer, new_size as usize, read_size)?;
 
         self.buffer_len = read_size;
         Ok(false)

@@ -35,7 +35,9 @@ use std::{ffi::CStr, io::Read};
 
 use bytesize::{KIB, MIB};
 
-use libbzip3_sys::{bz3_bound, bz3_free, bz3_new, bz3_state, bz3_strerror};
+use libbzip3_sys::{
+    bz3_bound, bz3_decode_block, bz3_encode_block, bz3_free, bz3_new, bz3_state, bz3_strerror,
+};
 
 pub mod errors;
 pub mod read;
@@ -151,6 +153,51 @@ impl Bz3State {
                 .to_str()
                 .expect("Invalid UTF-8")
         }
+    }
+
+    fn check_block_process_code(&mut self, code: i32) -> Result<()> {
+        if code == -1 {
+            return Err(Error::ProcessBlock(self.error().into()));
+        }
+        Ok(())
+    }
+
+    /// Compresses a block in-place.
+    ///
+    /// - `input_size` is the original data size before compression.
+    /// - `buf` must be able to hold the data after compression. That's,
+    ///    `buf.len() >= bound(input_size)` must be required.
+    ///
+    /// Returns the size of data written to `buf`.
+    pub fn encode_block(&mut self, buf: &mut [u8], input_size: usize) -> Result<usize> {
+        debug_assert!(input_size <= BLOCK_SIZE_MAX);
+        debug_assert!(buf.len() >= bound(input_size));
+        let result = unsafe { bz3_encode_block(self.raw, buf.as_mut_ptr(), input_size as _) };
+        self.check_block_process_code(result)?;
+
+        Ok(result as usize)
+    }
+
+    /// Decompresses a block in-place.
+    ///
+    /// `buf` must be able to hold at least `orig_size` bytes. The size must not exceed the block
+    /// size associated with the state.
+    ///
+    /// - `size` The size of the compressed data in `buf`.
+    /// - `orig_size` The original size of the data before compression.
+    pub fn decode_block(&mut self, buf: &mut [u8], size: usize, orig_size: usize) -> Result<()> {
+        debug_assert!(size <= BLOCK_SIZE_MAX);
+        debug_assert!(buf.len() <= BLOCK_SIZE_MAX);
+        debug_assert!(buf.len() >= orig_size);
+        let result =
+            unsafe { bz3_decode_block(self.raw, buf.as_mut_ptr(), size as _, orig_size as _) };
+        self.check_block_process_code(result)?;
+        if result as usize != orig_size {
+            return Err(Error::ProcessBlock(
+                "Data not match the origin size after decompression".into(),
+            ));
+        }
+        Ok(())
     }
 }
 
