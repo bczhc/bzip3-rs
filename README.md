@@ -11,7 +11,7 @@ This is a Rust wrapper for [bzip3](https://github.com/kspalaiologos/bzip3).
 - bundled: use bundled libbzip3
 
 Current bundled bzip3 library version
-is [kspalaiologos/bzip3@1.4.0](https://github.com/kspalaiologos/bzip3/commit/23659dc8c2722aff509050a7781470f545b5b81d).
+is [kspalaiologos/bzip3@1.5.1](https://github.com/kspalaiologos/bzip3/commit/d149f093793484d8eb55900ecf09c5714e277dba).
 
 ## TODO
 
