@@ -1,12 +1,10 @@
 extern crate core;
 
-use std::fmt::Write as _;
-use std::io::{self, Cursor, Read, Write};
-
 use bytesize::{ByteSize, MIB};
 use hex_literal::hex;
 use rand::{thread_rng, RngCore};
-use regex::Regex;
+use std::fmt::Write as _;
+use std::io::{self, Cursor, Read, Write};
 
 use bzip3::{read, write, Bz3State, BLOCK_SIZE_MAX, BLOCK_SIZE_MIN, MAGIC_NUMBER};
 
@@ -51,14 +49,6 @@ fn compress_and_decompress_parallel() {
             }
         }
     });
-}
-
-#[test]
-fn version() {
-    let version = bzip3::version();
-    assert!(Regex::new(r"^[0-9]+\.[0-9]+\.[0-9]+$")
-        .unwrap()
-        .is_match(version));
 }
 
 #[test]
@@ -174,7 +164,7 @@ fn decode_empty_blocks() {
     let block_size = hex!("0000 0001");
     let data_block = hex!("0d00000005000000d5a212e7ffffffff68656c6c6f");
     let mut archive: Vec<u8> = Vec::new();
-    archive.write_all(bzip3::MAGIC_NUMBER).unwrap();
+    archive.write_all(MAGIC_NUMBER).unwrap();
     archive.write_all(&block_size).unwrap();
     for _ in 0..10 {
         archive.write_all(&EMPTY_BLOCK).unwrap();

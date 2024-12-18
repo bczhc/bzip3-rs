@@ -101,6 +101,7 @@ pub fn version() -> &'static str {
         .expect("Invalid UTF-8")
 }
 
+// TODO: It may be a const function?
 /// Returns the recommended output buffer size for the compression function.
 pub fn bound(input: usize) -> usize {
     unsafe {
@@ -111,15 +112,11 @@ pub fn bound(input: usize) -> usize {
 
 /// Wrapper for the raw Bz3State.
 pub struct Bz3State {
+    block_size: usize,
     raw: *mut bz3_state,
 }
 
 impl Bz3State {
-    #[inline]
-    pub fn from_raw(state: *mut bz3_state) -> Bz3State {
-        Bz3State { raw: state }
-    }
-
     #[inline]
     fn check_block_size(size: usize) -> bool {
         matches!(size, BLOCK_SIZE_MIN..=BLOCK_SIZE_MAX)
@@ -137,7 +134,10 @@ impl Bz3State {
                 // This is fatal. Don't propagate it and just panic.
                 panic!("Allocation fails");
             }
-            Ok(Self::from_raw(state))
+            Ok(Bz3State {
+                raw: state,
+                block_size,
+            })
         }
     }
 
@@ -159,18 +159,23 @@ impl Bz3State {
         if code == -1 {
             return Err(Error::ProcessBlock(self.error().into()));
         }
+        if code == libbzip3_sys::BZ3_ERR_DATA_SIZE_TOO_SMALL {
+            return Err(Error::BlockSize);
+        }
         Ok(())
     }
 
     /// Compresses a block in-place.
     ///
-    /// - `input_size` is the original data size before compression.
+    /// - `input_size` is the original data size before compression. It must not exceed the block
+    ///    size associated with the state.
     /// - `buf` must be able to hold the data after compression. That's,
-    ///    `buf.len() >= bound(input_size)` must be required.
+    ///    `buf.len() >= bound(input_size)` must be required, in some cases where the compressed
+    ///    data is larger than the original one.
     ///
     /// Returns the size of data written to `buf`.
     pub fn encode_block(&mut self, buf: &mut [u8], input_size: usize) -> Result<usize> {
-        debug_assert!(input_size <= BLOCK_SIZE_MAX);
+        debug_assert!(input_size <= self.block_size);
         debug_assert!(buf.len() >= bound(input_size));
         let result = unsafe { bz3_encode_block(self.raw, buf.as_mut_ptr(), input_size as _) };
         self.check_block_process_code(result)?;
@@ -180,19 +185,37 @@ impl Bz3State {
 
     /// Decompresses a block in-place.
     ///
-    /// `buf` must be able to hold at least `orig_size` bytes. The size must not exceed the block
-    /// size associated with the state.
+    /// `buf` must be able to hold both compressed and original data.
     ///
-    /// - `size` The size of the compressed data in `buf`.
-    /// - `orig_size` The original size of the data before compression.
-    pub fn decode_block(&mut self, buf: &mut [u8], size: usize, orig_size: usize) -> Result<()> {
-        debug_assert!(size <= BLOCK_SIZE_MAX);
-        debug_assert!(buf.len() <= BLOCK_SIZE_MAX);
-        debug_assert!(buf.len() >= orig_size);
-        let result =
-            unsafe { bz3_decode_block(self.raw, buf.as_mut_ptr(), size as _, orig_size as _) };
+    /// The original doc states as below:
+    ///
+    ///  * `buffer` must be able to hold at least `bz3_bound(orig_size)` bytes
+    ///  * in order to ensure decompression will succeed for all possible bzip3 blocks.
+    ///  *
+    ///  * In most (but not all) cases, `orig_size` should usually be sufficient.
+    ///  * If it is not sufficient, you must allocate a buffer of size `bz3_bound(orig_size)` temporarily.
+    ///  *
+    ///  * If `buffer_size` is too small, `BZ3_ERR_DATA_SIZE_TOO_SMALL` will be returned.
+    ///  * The size must not exceed the block size associated with the state.
+    pub fn decode_block(
+        &mut self,
+        buf: &mut [u8],
+        compressed_size: usize,
+        original_size: usize,
+    ) -> Result<()> {
+        debug_assert!(buf.len() >= original_size && buf.len() >= compressed_size);
+        debug_assert!(compressed_size <= i32::MAX as usize);
+        let result = unsafe {
+            bz3_decode_block(
+                self.raw,
+                buf.as_mut_ptr(),
+                buf.len(),
+                compressed_size as _,
+                original_size as _,
+            )
+        };
         self.check_block_process_code(result)?;
-        if result as usize != orig_size {
+        if result as usize != original_size {
             return Err(Error::ProcessBlock(
                 "Data not match the origin size after decompression".into(),
             ));
@@ -211,3 +234,33 @@ impl Drop for Bz3State {
 
 unsafe impl Send for Bz3State {}
 unsafe impl Sync for Bz3State {}
+
+#[cfg(test)]
+mod test {
+    use crate as bzip3;
+    use crate::{bound, Bz3State};
+    use bytesize::MIB;
+    use regex::Regex;
+
+    #[test]
+    fn version() {
+        let version = bzip3::version();
+        assert!(Regex::new(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+            .unwrap()
+            .is_match(version));
+    }
+
+    #[test]
+    fn encode_decode_raw() {
+        let data = b"hello, world";
+        let mut buf = vec![0_u8; bound(data.len())];
+        buf[..data.len()].copy_from_slice(data);
+        let mut bs = Bz3State::new(MIB as _).unwrap();
+        let compressed_size = bs.encode_block(&mut buf, data.len()).unwrap();
+
+        bs.decode_block(&mut buf, compressed_size, data.len())
+            .unwrap();
+        let decompressed = &buf[..data.len()];
+        assert_eq!(decompressed, &data[..]);
+    }
+}
