@@ -26,5 +26,5 @@ jobs:
         run: cargo build --workspace --features bundled
       - name: Test
         run: |
-          cargo test --workspace --features bundled
-          cargo test --workspace --release --features bundled
+          cargo test --features bundled
+          cargo test --release --features bundled
