@@ -6,7 +6,7 @@ use std::io::{ErrorKind, Read, Write};
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 
 use crate::errors::*;
-use crate::{bound, Bz3State, TryReadExact, BLOCK_SIZE_MAX, BLOCK_SIZE_MIN, MAGIC_NUMBER};
+use crate::{bound, Bz3State, TryReadExact, MAGIC_NUMBER};
 
 pub struct Bz3Encoder<R>
 where
@@ -114,7 +114,7 @@ where
                     }
                 }
                 Err(Error::ProcessBlock(msg)) => {
-                    return Err(io::Error::new(ErrorKind::Other, msg));
+                    return Err(io::Error::other(msg));
                 }
                 Err(Error::Io(e)) => {
                     return Err(e);
@@ -287,7 +287,7 @@ where
                     return Ok(0);
                 }
                 Err(Error::ProcessBlock(msg)) => {
-                    return Err(io::Error::new(ErrorKind::Other, msg));
+                    return Err(io::Error::other(msg));
                 }
                 Err(Error::Io(e)) => {
                     return Err(e);

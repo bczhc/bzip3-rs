@@ -6,7 +6,7 @@ use std::io::{Cursor, Read, Write};
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 
 use crate::errors::*;
-use crate::{bound, Bz3State, BLOCK_SIZE_MAX, BLOCK_SIZE_MIN, MAGIC_NUMBER};
+use crate::{bound, Bz3State, MAGIC_NUMBER};
 
 pub struct Bz3Encoder<W>
 where

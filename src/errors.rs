@@ -1,5 +1,4 @@
 use std::io;
-use std::io::ErrorKind;
 use thiserror::Error;
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -20,7 +19,7 @@ impl Error {
     pub(crate) fn into_io_error(self) -> io::Error {
         match self {
             Error::Io(e) => e,
-            e => io::Error::new(ErrorKind::Other, e),
+            e => io::Error::other(e),
         }
     }
 }

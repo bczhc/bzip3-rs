@@ -167,11 +167,12 @@ impl Bz3State {
 
     /// Compresses a block in-place.
     ///
+    ///
     /// - `input_size` is the original data size before compression. It must not exceed the block
-    ///    size associated with the state.
+    ///   size associated with the state.
     /// - `buf` must be able to hold the data after compression. That's,
-    ///    `buf.len() >= bound(input_size)` must be required, in some cases where the compressed
-    ///    data is larger than the original one.
+    ///   `buf.len() >= bound(input_size)` must be required, in some cases where the compressed
+    ///   data is larger than the original one.
     ///
     /// Returns the size of data written to `buf`.
     pub fn encode_block(&mut self, buf: &mut [u8], input_size: usize) -> Result<usize> {
