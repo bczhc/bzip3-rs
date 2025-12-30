@@ -3,7 +3,7 @@
 use std::io;
 use std::io::{ErrorKind, Read, Write};
 
-use byteorder::{ReadBytesExt, WriteBytesExt, LE};
+use byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt, LE};
 
 use crate::errors::*;
 use crate::{bound, Bz3State, TryReadExact, MAGIC_NUMBER};

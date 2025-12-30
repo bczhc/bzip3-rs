@@ -12,7 +12,3 @@ This is a Rust wrapper for [bzip3](https://github.com/iczelia/bzip3).
 
   Current bundled bzip3 library version
   is [iczelia/bzip3@1.5.3](https://github.com/iczelia/bzip3/commit/53984efe378df61a4d3eb41637355c453eec338f).
-
-## TODO
-
-Stream encoder/decoder multithreading support.

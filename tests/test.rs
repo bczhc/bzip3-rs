@@ -1,17 +1,18 @@
 extern crate core;
 
-use bytesize::{ByteSize, MIB};
+use bytesize::{mib, ByteSize, MIB};
 use hex_literal::hex;
 use rand::{thread_rng, RngCore};
 use std::fmt::Write as _;
 use std::io::{self, Cursor, Read, Write};
 
+use bzip3::stream::{parallel_compress, parallel_decompress};
 use bzip3::{read, write, Bz3State, BLOCK_SIZE_MAX, BLOCK_SIZE_MIN, MAGIC_NUMBER};
 
 const KB: usize = 1024;
 
 #[test]
-fn compress_and_decompress_parallel() {
+fn test_compress_and_decompress() {
     let test_size_array = [
         0_usize,
         1,
@@ -290,4 +291,129 @@ fn block_size() {
     assert!(Bz3State::new(BLOCK_SIZE_MAX).is_ok());
     assert!(Bz3State::new(BLOCK_SIZE_MIN - 1).is_err());
     assert!(Bz3State::new(BLOCK_SIZE_MAX + 1).is_err());
+}
+
+#[test]
+fn test_parallel() {
+    let sizes = [
+        0,
+        10,
+        1024,
+        BLOCK_SIZE_MIN,
+        BLOCK_SIZE_MIN + 1234,
+        BLOCK_SIZE_MIN * 2 + 7,
+    ];
+    let block_size = BLOCK_SIZE_MIN;
+
+    for &size in &sizes {
+        let original_data = generate_deterministic_data(size);
+
+        // compression
+        let mut compressed_output = Vec::new();
+        parallel_compress(
+            Cursor::new(&original_data),
+            &mut compressed_output,
+            block_size,
+        )
+        .unwrap_or_else(|_| panic!("Compression failed for size {}", size));
+
+        // decompression
+        let mut decompressed_output = Vec::new();
+        parallel_decompress(Cursor::new(&compressed_output), &mut decompressed_output)
+            .unwrap_or_else(|_| panic!("Decompression failed for size {}", size));
+
+        assert_eq!(
+            original_data, decompressed_output,
+            "Data mismatch for size {}",
+            size
+        );
+    }
+}
+
+#[test]
+fn test_parallel_compression_reproducibility() {
+    let sizes = [
+        0,
+        1024,
+        BLOCK_SIZE_MIN,
+        BLOCK_SIZE_MIN + 1,
+        BLOCK_SIZE_MIN * 2,
+        100 * 1024,
+        200 * 1024,
+        mib(100_u64) as usize,
+        mib(300_u64) as usize,
+    ];
+
+    let block_size = BLOCK_SIZE_MIN;
+
+    for &size in &sizes {
+        let data = generate_deterministic_data(size);
+
+        let mut first_run = Vec::new();
+        parallel_compress(Cursor::new(&data), &mut first_run, block_size)
+            .expect(&format!("First compression failed for size {}", size));
+
+        let mut second_run = Vec::new();
+        parallel_compress(Cursor::new(&data), &mut second_run, block_size)
+            .expect(&format!("Second compression failed for size {}", size));
+
+        assert_eq!(
+            first_run, second_run,
+            "Non-reproducible output at size {}",
+            size
+        );
+
+        if size > 0 || !first_run.is_empty() {
+            assert_eq!(
+                &first_run[0..5],
+                MAGIC_NUMBER,
+                "Missing magic number at size {}",
+                size
+            );
+        }
+    }
+}
+
+#[test]
+fn test_parallel_empty_input() {
+    let original_data: Vec<u8> = Vec::new();
+    let mut compressed = Vec::new();
+    parallel_compress(Cursor::new(&original_data), &mut compressed, BLOCK_SIZE_MIN).unwrap();
+
+    let mut decompressed = Vec::new();
+    parallel_decompress(Cursor::new(&compressed), &mut decompressed).unwrap();
+
+    assert!(decompressed.is_empty());
+}
+
+#[test]
+fn test_parallel_large() {
+    let block_size = BLOCK_SIZE_MIN;
+    let data_size = 10 * MIB as usize;
+    let original_data = generate_deterministic_data(data_size);
+
+    let mut compressed_buffer = Vec::new();
+    parallel_compress(
+        Cursor::new(&original_data),
+        &mut compressed_buffer,
+        block_size,
+    )
+    .expect("Parallel compression failed");
+
+    assert!(compressed_buffer.len() > 9);
+    assert_eq!(&compressed_buffer[0..5], MAGIC_NUMBER);
+
+    let mut decompressed_buffer = Vec::new();
+    parallel_decompress(Cursor::new(&compressed_buffer), &mut decompressed_buffer)
+        .expect("Parallel decompression failed");
+
+    assert_eq!(
+        original_data.len(),
+        decompressed_buffer.len(),
+        "Decompressed size mismatch"
+    );
+    assert_eq!(
+        original_data, decompressed_buffer,
+        "Data corruption in parallel roundtrip"
+    );
 }
