@@ -1,3 +1,5 @@
+#![warn(clippy::all, clippy::nursery)]
+
 //! BZip3-rs
 //! ----
 //! BZip3 compression for Rust.
@@ -118,7 +120,7 @@ pub struct Bz3State {
 
 impl Bz3State {
     #[inline]
-    fn check_block_size(size: usize) -> bool {
+    const fn check_block_size(size: usize) -> bool {
         matches!(size, BLOCK_SIZE_MIN..=BLOCK_SIZE_MAX)
     }
 
@@ -134,7 +136,7 @@ impl Bz3State {
                 // This is fatal. Don't propagate it and just panic.
                 panic!("Allocation fails");
             }
-            Ok(Bz3State {
+            Ok(Self {
                 raw: state,
                 block_size,
             })
@@ -142,7 +144,7 @@ impl Bz3State {
     }
 
     #[inline]
-    pub fn as_raw(&mut self) -> *mut bz3_state {
+    pub const fn as_raw(&mut self) -> *mut bz3_state {
         self.raw
     }
 

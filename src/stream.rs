@@ -68,7 +68,7 @@ pub fn parallel_compress<R: Read, W: Write>(
 
         let results: Vec<Result<(Vec<u8>, usize, usize)>> = chunks
             .into_par_iter()
-            .map(|(mut buf, original_size)| {
+            .map(|(buf, original_size)| {
                 let mut state = Bz3State::new(block_size)?;
                 let mut out_buf = vec![0u8; bound(original_size)];
                 out_buf[..original_size].copy_from_slice(&buf[..original_size]);

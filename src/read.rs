@@ -3,7 +3,7 @@
 use std::io;
 use std::io::{ErrorKind, Read, Write};
 
-use byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt, LE};
+use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 
 use crate::errors::*;
 use crate::{bound, Bz3State, TryReadExact, MAGIC_NUMBER};
@@ -196,7 +196,7 @@ where
     }
 
     /// Returns the bzip3 block size associated with the current state.
-    pub fn block_size(&self) -> usize {
+    pub const fn block_size(&self) -> usize {
         self.block_size
     }
 

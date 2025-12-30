@@ -3,7 +3,7 @@
 use std::io;
 use std::io::{Cursor, Read, Write};
 
-use byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt, LE};
+use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 
 use crate::errors::*;
 use crate::{bound, Bz3State, MAGIC_NUMBER};

@@ -1,8 +1,10 @@
+#![warn(clippy::all, clippy::nursery)]
+
 extern crate core;
 
 use bytesize::{mib, ByteSize, MIB};
 use hex_literal::hex;
-use rand::{thread_rng, RngCore};
+use rand::{rng, RngCore};
 use std::fmt::Write as _;
 use std::io::{self, Cursor, Read, Write};
 
@@ -258,7 +260,7 @@ fn test_read_based(data_size: usize, block_size: usize) {
 }
 
 fn generate_random_data(size: usize) -> Vec<u8> {
-    let mut rng = thread_rng();
+    let mut rng = rng();
 
     let mut data = vec![0_u8; size];
     rng.fill_bytes(&mut data);
@@ -351,11 +353,11 @@ fn test_parallel_compression_reproducibility() {
 
         let mut first_run = Vec::new();
         parallel_compress(Cursor::new(&data), &mut first_run, block_size)
-            .expect(&format!("First compression failed for size {}", size));
+            .unwrap_or_else(|_| panic!("First compression failed for size {}", size));
 
         let mut second_run = Vec::new();
         parallel_compress(Cursor::new(&data), &mut second_run, block_size)
-            .expect(&format!("Second compression failed for size {}", size));
+            .unwrap_or_else(|_| panic!("Second compression failed for size {}", size));
 
         assert_eq!(
             first_run, second_run,
@@ -414,6 +416,6 @@ fn test_parallel_large() {
     );
     assert_eq!(
         original_data, decompressed_buffer,
-        "Data corruption in parallel roundtrip"
+        "Data corruption in parallel round trip"
     );
 }
