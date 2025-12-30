@@ -1,45 +1,38 @@
-use std::io;
-use std::io::{stdin, stdout, BufWriter};
-use std::str::FromStr;
+use bytesize::MIB;
+use bzip3::stream::{parallel_compress, parallel_decompress};
+use clap::Parser;
+use std::io::{stdin, stdout, BufReader, BufWriter};
 
-use bytesize::ByteSize;
-use clap::{Arg, ArgAction, Command};
+const DEFAULT_BLOCK_SIZE_MIB: usize = 16_usize;
 
-use bzip3::{version, write};
+#[derive(Parser, Debug)]
+#[command(author, version, about = "BZip3 Parallel CLI", long_about = None)]
+/// This produces results identical to the C version bzip3(1).
+struct Args {
+    /// Decompression mode.
+    #[arg(short, long)]
+    decompress: bool,
+
+    /// Block size in megabytes.
+    #[arg(short, long, default_value_t = DEFAULT_BLOCK_SIZE_MIB)]
+    block_size: usize,
+}
 
 fn main() -> anyhow::Result<()> {
-    eprintln!("Bzip3 version: {}", version());
+    let args = Args::parse();
+    let block_size_bytes = args.block_size * MIB as usize;
 
-    let matches = Command::new("bzip3")
-        .arg(
-            Arg::new("block-size")
-                .short('b')
-                .long("block-size")
-                .default_value("16MiB")
-                .conflicts_with("decompress"),
-        )
-        .arg(
-            Arg::new("decompress")
-                .short('d')
-                .long("decompress")
-                .required(false)
-                .action(ArgAction::SetTrue),
-        )
-        .get_matches();
-
-    let decompress = matches.get_flag("decompress");
-
-    let mut writer = BufWriter::new(stdout().lock());
-    let mut reader = stdin().lock();
-
-    if decompress {
-        let mut decoder = write::Bz3Decoder::new(&mut writer);
-        io::copy(&mut reader, &mut decoder).unwrap();
+    if args.decompress {
+        parallel_decompress(
+            BufReader::new(stdin().lock()),
+            BufWriter::new(stdout().lock()),
+        )?;
     } else {
-        let block_size = matches.get_one::<String>("block-size").unwrap();
-        let block_size = ByteSize::from_str(block_size).unwrap().0 as usize;
-        let mut encoder = write::Bz3Encoder::new(&mut writer, block_size).unwrap();
-        io::copy(&mut reader, &mut encoder).unwrap();
+        parallel_compress(
+            BufReader::new(stdin().lock()),
+            BufWriter::new(stdout().lock()),
+            block_size_bytes,
+        )?;
     }
     Ok(())
 }
