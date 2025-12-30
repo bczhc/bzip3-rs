@@ -236,7 +236,6 @@ impl Drop for Bz3State {
 }
 
 unsafe impl Send for Bz3State {}
-unsafe impl Sync for Bz3State {}
 
 #[cfg(test)]
 mod test {
