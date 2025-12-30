@@ -8,8 +8,8 @@ use rand::{rng, RngCore};
 use std::fmt::Write as _;
 use std::io::{self, Cursor, Read, Write};
 
-use bzip3::stream::{parallel_compress, parallel_decompress};
-use bzip3::{read, write, Bz3State, BLOCK_SIZE_MAX, BLOCK_SIZE_MIN, MAGIC_NUMBER};
+use bzip3::stream::{compress, decompress};
+use bzip3::{read, write, BlockSize, BLOCK_SIZE_MAX, BLOCK_SIZE_MIN, MAGIC_NUMBER};
 
 const KB: usize = 1024;
 
@@ -63,7 +63,7 @@ fn test_compressing_and_decompressing_small_input() {
         let mut output = vec![];
         io::copy(
             &mut &*input,
-            &mut write::Bz3Encoder::new(&mut output, 100 * KB).unwrap(),
+            &mut write::Bz3Encoder::new(&mut output, BlockSize::kib(100).unwrap()),
         )
         .unwrap();
 
@@ -89,7 +89,7 @@ fn test_compressing_and_decompressing_small_input() {
     let compressed = {
         let mut output = vec![];
         io::copy(
-            &mut read::Bz3Encoder::new(input, 100 * KB).unwrap(),
+            &mut read::Bz3Encoder::new(input, BlockSize::kib(100).unwrap()).unwrap(),
             &mut output,
         )
         .unwrap();
@@ -140,7 +140,7 @@ fn test_chained_encoders_and_decoders_with_multiple_blocks() {
 #[test]
 fn avoid_creating_empty_blocks_by_flush_calls() {
     let mut buf = Vec::new();
-    let mut encoder = write::Bz3Encoder::new(&mut buf, 16 * MIB as usize).unwrap();
+    let mut encoder = write::Bz3Encoder::new(&mut buf, BlockSize::mib(16).unwrap());
     encoder.flush().unwrap();
     encoder.flush().unwrap();
     encoder.flush().unwrap();
@@ -148,12 +148,12 @@ fn avoid_creating_empty_blocks_by_flush_calls() {
     drop(encoder);
     assert_eq!(buf, {
         let mut vec = Vec::from(*MAGIC_NUMBER);
-        vec.extend_from_slice(&hex!("00000001"));
+        vec.extend_from_slice(&hex!("00000001") /* 16MiB in LE */);
         vec
     });
 
     let mut buf = Vec::new();
-    let mut encoder = write::Bz3Encoder::new(&mut buf, 16 * MIB as usize).unwrap();
+    let mut encoder = write::Bz3Encoder::new(&mut buf, BlockSize::mib(16).unwrap());
     encoder.flush().unwrap();
     encoder.write_all(b"hello").unwrap();
     drop(encoder);
@@ -196,10 +196,13 @@ fn create_encoder_chain<'a>(
     block_size: usize,
 ) -> Box<dyn Read + 'a> {
     assert!(chain_size >= 1);
-    let mut encoder: Box<dyn Read> = Box::new(read::Bz3Encoder::new(reader, block_size).unwrap());
+    let mut encoder: Box<dyn Read> =
+        Box::new(read::Bz3Encoder::new(reader, BlockSize::new(block_size as _).unwrap()).unwrap());
 
     for _ in 1..chain_size {
-        encoder = Box::new(read::Bz3Encoder::new(encoder, block_size).unwrap());
+        encoder = Box::new(
+            read::Bz3Encoder::new(encoder, BlockSize::new(block_size as _).unwrap()).unwrap(),
+        );
     }
 
     encoder
@@ -221,7 +224,7 @@ fn test_write_based(data_size: usize, block_size: usize) {
     let mut reader = Cursor::new(&data);
     let mut writer = Cursor::new(Vec::new());
 
-    let mut encoder = write::Bz3Encoder::new(&mut writer, block_size).unwrap();
+    let mut encoder = write::Bz3Encoder::new(&mut writer, BlockSize::new(block_size as _).unwrap());
     io::copy(&mut reader, &mut encoder).unwrap();
     drop(encoder);
 
@@ -243,7 +246,8 @@ fn test_read_based(data_size: usize, block_size: usize) {
     let mut compressed = Cursor::new(Vec::new());
     {
         let mut reader = Cursor::new(&mut data);
-        let mut encoder = read::Bz3Encoder::new(&mut reader, block_size).unwrap();
+        let mut encoder =
+            read::Bz3Encoder::new(&mut reader, BlockSize::new(block_size as _).unwrap()).unwrap();
         io::copy(&mut encoder, &mut compressed).unwrap();
     }
     let compressed = compressed.into_inner();
@@ -289,10 +293,10 @@ fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 
 #[test]
 fn block_size() {
-    assert!(Bz3State::new(BLOCK_SIZE_MIN).is_ok());
-    assert!(Bz3State::new(BLOCK_SIZE_MAX).is_ok());
-    assert!(Bz3State::new(BLOCK_SIZE_MIN - 1).is_err());
-    assert!(Bz3State::new(BLOCK_SIZE_MAX + 1).is_err());
+    assert!(BlockSize::new(BLOCK_SIZE_MIN).is_some());
+    assert!(BlockSize::new(BLOCK_SIZE_MAX).is_some());
+    assert!(BlockSize::new(BLOCK_SIZE_MIN - 1).is_none());
+    assert!(BlockSize::new(BLOCK_SIZE_MAX + 1).is_none());
 }
 
 #[test]
@@ -308,21 +312,26 @@ fn test_parallel() {
     let block_size = BLOCK_SIZE_MIN;
 
     for &size in &sizes {
-        let original_data = generate_deterministic_data(size);
+        let original_data = generate_deterministic_data(size as _);
 
         // compression
         let mut compressed_output = Vec::new();
-        parallel_compress(
+        compress(
             Cursor::new(&original_data),
             &mut compressed_output,
-            block_size,
+            BlockSize::new(block_size).unwrap(),
+            None,
         )
         .unwrap_or_else(|_| panic!("Compression failed for size {}", size));
 
         // decompression
         let mut decompressed_output = Vec::new();
-        parallel_decompress(Cursor::new(&compressed_output), &mut decompressed_output)
-            .unwrap_or_else(|_| panic!("Decompression failed for size {}", size));
+        decompress(
+            Cursor::new(&compressed_output),
+            &mut decompressed_output,
+            None,
+        )
+        .unwrap_or_else(|_| panic!("Decompression failed for size {}", size));
 
         assert_eq!(
             original_data, decompressed_output,
@@ -342,22 +351,32 @@ fn test_parallel_compression_reproducibility() {
         BLOCK_SIZE_MIN * 2,
         100 * 1024,
         200 * 1024,
-        mib(100_u64) as usize,
-        mib(300_u64) as usize,
+        mib(100_u64) as _,
+        mib(300_u64) as _,
     ];
 
     let block_size = BLOCK_SIZE_MIN;
 
     for &size in &sizes {
-        let data = generate_deterministic_data(size);
+        let data = generate_deterministic_data(size as _);
 
         let mut first_run = Vec::new();
-        parallel_compress(Cursor::new(&data), &mut first_run, block_size)
-            .unwrap_or_else(|_| panic!("First compression failed for size {}", size));
+        compress(
+            Cursor::new(&data),
+            &mut first_run,
+            BlockSize::new(block_size).unwrap(),
+            None,
+        )
+        .unwrap_or_else(|_| panic!("First compression failed for size {}", size));
 
         let mut second_run = Vec::new();
-        parallel_compress(Cursor::new(&data), &mut second_run, block_size)
-            .unwrap_or_else(|_| panic!("Second compression failed for size {}", size));
+        compress(
+            Cursor::new(&data),
+            &mut second_run,
+            BlockSize::new(block_size).unwrap(),
+            None,
+        )
+        .unwrap_or_else(|_| panic!("Second compression failed for size {}", size));
 
         assert_eq!(
             first_run, second_run,
@@ -380,10 +399,16 @@ fn test_parallel_compression_reproducibility() {
 fn test_parallel_empty_input() {
     let original_data: Vec<u8> = Vec::new();
     let mut compressed = Vec::new();
-    parallel_compress(Cursor::new(&original_data), &mut compressed, BLOCK_SIZE_MIN).unwrap();
+    compress(
+        Cursor::new(&original_data),
+        &mut compressed,
+        BlockSize::MIN,
+        None,
+    )
+    .unwrap();
 
     let mut decompressed = Vec::new();
-    parallel_decompress(Cursor::new(&compressed), &mut decompressed).unwrap();
+    decompress(Cursor::new(&compressed), &mut decompressed, None).unwrap();
 
     assert!(decompressed.is_empty());
 }
@@ -395,10 +420,11 @@ fn test_parallel_large() {
     let original_data = generate_deterministic_data(data_size);
 
     let mut compressed_buffer = Vec::new();
-    parallel_compress(
+    compress(
         Cursor::new(&original_data),
         &mut compressed_buffer,
-        block_size,
+        BlockSize::new(block_size).unwrap(),
+        None,
     )
     .expect("Parallel compression failed");
 
@@ -406,8 +432,12 @@ fn test_parallel_large() {
     assert_eq!(&compressed_buffer[0..5], MAGIC_NUMBER);
 
     let mut decompressed_buffer = Vec::new();
-    parallel_decompress(Cursor::new(&compressed_buffer), &mut decompressed_buffer)
-        .expect("Parallel decompression failed");
+    decompress(
+        Cursor::new(&compressed_buffer),
+        &mut decompressed_buffer,
+        None,
+    )
+    .expect("Parallel decompression failed");
 
     assert_eq!(
         original_data.len(),

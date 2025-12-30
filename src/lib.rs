@@ -6,10 +6,10 @@
 //!
 //! # BZip3 file structure:
 //!
-//! \[ magic number (\[u8; 5\]) | block size (i32) | block1 | block2 | blockN... \]
+//! \[ magic number (\[u8; 5\]) | block size (u32) | block 1 | block 2 | ... | block N \]
 //!
 //! Structure of each block:
-//! \[ new size (i32) | read size (i32) | data \]
+//! \[ new size (u32) | read size (u32) | data \]
 //!
 //! Due to the naming from the original bzip3 library,
 //! `new size` indicates the data size after compression, and `read size` indicates the original
@@ -33,13 +33,14 @@
 //! ```
 extern crate core;
 
-use std::{ffi::CStr, io::Read};
-
 use bytesize::{KIB, MIB};
-
 use libbzip3_sys::{
     bz3_bound, bz3_decode_block, bz3_encode_block, bz3_free, bz3_new, bz3_state, bz3_strerror,
+    BZ3_ERR_DATA_SIZE_TOO_SMALL, BZ3_OK,
 };
+use std::io::ErrorKind;
+use std::ops::Deref;
+use std::{ffi::CStr, io::Read};
 
 pub mod errors;
 pub mod read;
@@ -50,48 +51,78 @@ pub use errors::{Error, Result};
 /// Signature of a bzip3 file.
 pub const MAGIC_NUMBER: &[u8; 5] = b"BZ3v1";
 
-/// Minimum block size.
-pub const BLOCK_SIZE_MIN: usize = 65 * KIB as usize;
+/// A block size wrapper with range checked.
+///
+/// `block_size` in the C library, `size_t`, `uint32_t` and `int32_t`
+/// are all used inconsistently. So to pass the value to them, just do `as _`.
+#[derive(Debug, Copy, Clone)]
+#[repr(transparent)]
+pub struct BlockSize(u32);
 
-/// Maximum block size.
-pub const BLOCK_SIZE_MAX: usize = 511 * MIB as usize;
+impl Deref for BlockSize {
+    type Target = u32;
 
-pub(crate) trait TryReadExact {
-    /// Read exact data
-    ///
-    /// This function blocks. It reads exact data, and returns bytes it reads. The return value
-    /// will always be the buffer size until it reaches EOF.
-    ///
-    /// When reaching EOF, the return value will be less than the size of the given buffer,
-    /// or just zero.
-    ///
-    /// This simulates C function `fread`.
-    fn try_read_exact(&mut self, buf: &mut [u8]) -> std::io::Result<usize>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
-impl<R> TryReadExact for R
+pub const BLOCK_SIZE_MIN: u32 = 65 * KIB as u32;
+
+pub const BLOCK_SIZE_MAX: u32 = 511 * MIB as u32;
+
+impl BlockSize {
+    /// Minimum block size.
+    pub const MIN: Self = Self(BLOCK_SIZE_MIN);
+
+    /// Maximum block size.
+    pub const MAX: Self = Self(BLOCK_SIZE_MAX);
+
+    const fn bytes(size: u32) -> Option<Self> {
+        if !matches!(size, BLOCK_SIZE_MIN..=BLOCK_SIZE_MAX) {
+            return None;
+        }
+        Some(Self(size))
+    }
+
+    pub const fn new(size: u32) -> Option<Self> {
+        Self::bytes(size)
+    }
+
+    pub const fn kib(kib: u32) -> Option<Self> {
+        Self::bytes(kib.saturating_mul(KIB as u32))
+    }
+
+    pub const fn mib(mib: u32) -> Option<Self> {
+        Self::bytes(mib.saturating_mul(MIB as u32))
+    }
+}
+
+pub(crate) trait ReadExt {
+    /// Reads and fill `buf`.
+    ///
+    /// This function behaves like [`Read::read_exact`] but gives the size already read on
+    /// EOF reached. That is, the return value will always be `buf.len()` while EOF not reached.
+    ///
+    /// This simulates C function `fread`.
+    fn read_full(&mut self, buf: &mut [u8]) -> std::io::Result<usize>;
+}
+
+impl<R> ReadExt for R
 where
     R: Read,
 {
-    fn try_read_exact(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+    fn read_full(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let mut read = 0_usize;
-        loop {
-            let result = self.read(&mut buf[read..]);
-            match result {
-                Ok(r) => {
-                    if r == 0 {
-                        return Ok(read);
-                    }
-                    read += r;
-                    if read == buf.len() {
-                        return Ok(read);
-                    }
-                }
-                Err(e) => {
-                    return Err(e);
-                }
+        while read < buf.len() {
+            match self.read(&mut buf[read..]) {
+                Ok(0) => break, /* EOF */
+                Ok(r) => read += r,
+                Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+                Err(e) => return Err(e),
             }
         }
+        Ok(read)
     }
 }
 
@@ -106,40 +137,28 @@ pub fn version() -> &'static str {
 // TODO: It may be a const function?
 /// Returns the recommended output buffer size for the compression function.
 pub fn bound(input: usize) -> usize {
-    unsafe {
-        // SAFETY: only performs an arithmetic calculation
-        bz3_bound(input)
-    }
+    unsafe { bz3_bound(input) }
 }
 
 /// Wrapper for the raw Bz3State.
 pub struct Bz3State {
-    block_size: usize,
+    block_size: u32,
     raw: *mut bz3_state,
 }
 
 impl Bz3State {
-    #[inline]
-    const fn check_block_size(size: usize) -> bool {
-        matches!(size, BLOCK_SIZE_MIN..=BLOCK_SIZE_MAX)
-    }
-
     /// Creates a new Bz3State.
-    pub fn new(block_size: usize) -> Result<Self> {
-        if !Self::check_block_size(block_size) {
-            return Err(Error::BlockSize);
-        }
-
+    pub fn new(block_size: BlockSize) -> Self {
         unsafe {
-            let state = bz3_new(block_size as i32);
+            let state = bz3_new(*block_size as _);
             if state.is_null() {
-                // This is fatal. Don't propagate it and just panic.
+                // This is fatal. Just panic.
                 panic!("Allocation fails");
             }
-            Ok(Self {
+            Self {
                 raw: state,
-                block_size,
-            })
+                block_size: *block_size as _,
+            }
         }
     }
 
@@ -149,8 +168,8 @@ impl Bz3State {
     }
 
     pub fn error(&mut self) -> &'static str {
+        // SAFETY: in bzip3 source code, this returns static string literals.
         unsafe {
-            // SAFETY: in bzip3 source code, this returns static string literals
             CStr::from_ptr(bz3_strerror(self.raw))
                 .to_str()
                 .expect("Invalid UTF-8")
@@ -158,10 +177,11 @@ impl Bz3State {
     }
 
     fn check_block_process_code(&mut self, code: i32) -> Result<()> {
+        // TODO: more errors
         if code == -1 {
             return Err(Error::ProcessBlock(self.error().into()));
         }
-        if code == libbzip3_sys::BZ3_ERR_DATA_SIZE_TOO_SMALL {
+        if code == BZ3_ERR_DATA_SIZE_TOO_SMALL {
             return Err(Error::BlockSize);
         }
         Ok(())
@@ -172,13 +192,13 @@ impl Bz3State {
     ///
     /// - `input_size` is the original data size before compression. It must not exceed the block
     ///   size associated with the state.
-    /// - `buf` must be able to hold the data after compression. That's,
+    /// - `buf` must be able to hold the data after compression. That is,
     ///   `buf.len() >= bound(input_size)` must be required, in some cases where the compressed
     ///   data is larger than the original one.
     ///
     /// Returns the size of data written to `buf`.
     pub fn encode_block(&mut self, buf: &mut [u8], input_size: usize) -> Result<usize> {
-        debug_assert!(input_size <= self.block_size);
+        debug_assert!(input_size <= self.block_size as _);
         debug_assert!(buf.len() >= bound(input_size));
         let result = unsafe { bz3_encode_block(self.raw, buf.as_mut_ptr(), input_size as _) };
         self.check_block_process_code(result)?;
@@ -240,8 +260,7 @@ unsafe impl Send for Bz3State {}
 #[cfg(test)]
 mod test {
     use crate as bzip3;
-    use crate::{bound, Bz3State};
-    use bytesize::MIB;
+    use crate::{bound, BlockSize, Bz3State};
     use regex::Regex;
 
     #[test]
@@ -257,7 +276,7 @@ mod test {
         let data = b"hello, world";
         let mut buf = vec![0_u8; bound(data.len())];
         buf[..data.len()].copy_from_slice(data);
-        let mut bs = Bz3State::new(MIB as _).unwrap();
+        let mut bs = Bz3State::new(BlockSize::mib(1).unwrap());
         let compressed_size = bs.encode_block(&mut buf, data.len()).unwrap();
 
         bs.decode_block(&mut buf, compressed_size, data.len())

@@ -6,7 +6,7 @@ use std::io::{ErrorKind, Read, Write};
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 
 use crate::errors::*;
-use crate::{bound, Bz3State, TryReadExact, MAGIC_NUMBER};
+use crate::{bound, BlockSize, Bz3State, ReadExt, MAGIC_NUMBER};
 
 pub struct Bz3Encoder<R>
 where
@@ -35,17 +35,15 @@ where
     /// Valid block size is between [`BLOCK_SIZE_MIN`] and [`BLOCK_SIZE_MAX`] bytes.
     ///
     /// # Errors
-    ///
-    /// This returns [`Error::BlockSize`] if the block size is invalid.
-    pub fn new(reader: R, block_size: usize) -> Result<Self> {
-        let state = Bz3State::new(block_size)?;
+    pub fn new(reader: R, block_size: BlockSize) -> Result<Self> {
+        let state = Bz3State::new(block_size);
 
-        let buffer_size = bound(block_size) + MAGIC_NUMBER.len() + 4;
+        let buffer_size = bound(*block_size as _) + MAGIC_NUMBER.len() + 4;
         let mut buffer = vec![0_u8; buffer_size];
 
         let mut header = Vec::new();
         header.write_all(MAGIC_NUMBER).unwrap();
-        header.write_i32::<LE>(block_size as i32).unwrap();
+        header.write_i32::<LE>(*block_size as _).unwrap();
         buffer[..header.len()].copy_from_slice(&header);
 
         Ok(Self {
@@ -54,7 +52,7 @@ where
             buffer,
             buffer_pos: 0,
             buffer_len: header.len(), /* default buffer holds the header */
-            block_size,
+            block_size: *block_size as _,
             eof: false,
         })
     }
@@ -69,9 +67,7 @@ where
         // skip 8 bytes to write the buffer first
         let data_buffer = &mut buffer[8..];
 
-        let read_size = self
-            .reader
-            .try_read_exact(&mut data_buffer[..self.block_size])?;
+        let read_size = self.reader.read_full(&mut data_buffer[..self.block_size])?;
 
         let new_size = self.state.encode_block(data_buffer, read_size)?;
 
@@ -179,7 +175,7 @@ where
         }
 
         let block_size = reader.read_i32::<LE>()? as usize;
-        let state = Bz3State::new(block_size)?;
+        let state = Bz3State::new(BlockSize::new(block_size as _).ok_or(Error::BlockSize)?);
 
         let buffer_size = bound(block_size);
         let buffer = vec![0_u8; buffer_size];
@@ -210,7 +206,7 @@ where
     fn decompress_block(&mut self) -> Result<bool> {
         // Handle the block head. If there's no data to read, it reaches EOF of the bzip3 stream.
         let mut new_size_buf = [0_u8; 4];
-        let len = self.reader.try_read_exact(&mut new_size_buf)?;
+        let len = self.reader.read_full(&mut new_size_buf)?;
         let new_size = match len {
             0 => {
                 // a normal EOF

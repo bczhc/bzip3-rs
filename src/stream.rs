@@ -2,53 +2,30 @@
 //! that do a direct stream-to-stream process.
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use rayon::prelude::*;
-use std::io;
 use std::io::{Read, Write};
 
 use crate::errors::*;
-use crate::{bound, Bz3State, MAGIC_NUMBER};
+use crate::{bound, BlockSize, Bz3State, MAGIC_NUMBER};
 
-/// Compress `reader` to `writer`.
-///
-/// The block size must be between 65kiB and 511MiB.
-pub fn compress<R, W>(mut reader: R, mut writer: W, block_size: usize) -> Result<()>
-where
-    R: Read,
-    W: Write,
-{
-    let mut encoder = crate::read::Bz3Encoder::new(&mut reader, block_size)?;
-    io::copy(&mut encoder, &mut writer)?;
-    Ok(())
-}
-
-/// Decompress `reader` to `writer`.
-pub fn decompress<R, W>(mut reader: R, mut writer: W) -> Result<()>
-where
-    R: Read,
-    W: Write,
-{
-    let mut decoder = crate::read::Bz3Decoder::new(&mut reader)?;
-    io::copy(&mut decoder, &mut writer)?;
-    Ok(())
-}
-
-pub fn parallel_compress<R: Read, W: Write>(
+/// Parallelized stream compression.
+pub fn compress<R: Read, W: Write>(
     mut reader: R,
     mut writer: W,
-    block_size: usize,
+    block_size: BlockSize,
+    jobs: Option<usize>,
 ) -> Result<()> {
     writer.write_all(MAGIC_NUMBER)?;
-    writer.write_i32::<LE>(block_size as i32)?;
+    writer.write_i32::<LE>(*block_size as i32)?;
 
-    let num_cpus = rayon::current_num_threads();
+    let num_cpus = jobs.unwrap_or_else(rayon::current_num_threads);
 
     loop {
         let mut chunks = Vec::with_capacity(num_cpus);
 
         for _ in 0..num_cpus {
-            let mut buf = vec![0u8; block_size];
-            let mut read_size = 0;
-            while read_size < block_size {
+            let mut buf = vec![0u8; *block_size as usize];
+            let mut read_size = 0_usize;
+            while read_size < *block_size as _ {
                 let n = reader.read(&mut buf[read_size..])?;
                 if n == 0 {
                     break;
@@ -69,7 +46,7 @@ pub fn parallel_compress<R: Read, W: Write>(
         let results: Vec<Result<(Vec<u8>, usize, usize)>> = chunks
             .into_par_iter()
             .map(|(buf, original_size)| {
-                let mut state = Bz3State::new(block_size)?;
+                let mut state = Bz3State::new(block_size);
                 let mut out_buf = vec![0u8; bound(original_size)];
                 out_buf[..original_size].copy_from_slice(&buf[..original_size]);
 
@@ -89,7 +66,12 @@ pub fn parallel_compress<R: Read, W: Write>(
     Ok(())
 }
 
-pub fn parallel_decompress<R: Read, W: Write>(mut reader: R, mut writer: W) -> Result<()> {
+/// Parallelized stream decompression.
+pub fn decompress<R: Read, W: Write>(
+    mut reader: R,
+    mut writer: W,
+    jobs: Option<usize>,
+) -> Result<()> {
     let mut sig = [0u8; 5];
     reader
         .read_exact(&mut sig)
@@ -99,7 +81,8 @@ pub fn parallel_decompress<R: Read, W: Write>(mut reader: R, mut writer: W) -> R
     }
 
     let block_size = reader.read_i32::<LE>()? as usize;
-    let num_cpus = rayon::current_num_threads();
+    BlockSize::new(block_size as _).ok_or(Error::BlockSize)?;
+    let num_cpus = jobs.unwrap_or_else(rayon::current_num_threads);
 
     loop {
         let mut blocks = Vec::with_capacity(num_cpus);
@@ -125,7 +108,9 @@ pub fn parallel_decompress<R: Read, W: Write>(mut reader: R, mut writer: W) -> R
         let results: Vec<Result<(Vec<u8>, usize)>> = blocks
             .into_par_iter()
             .map(|(mut buf, new_size, original_size)| {
-                let mut state = Bz3State::new(block_size)?;
+                let mut state = Bz3State::new(
+                    BlockSize::new(block_size as _).unwrap(), /* pre-checked */
+                );
                 state.decode_block(&mut buf, new_size, original_size)?;
                 Ok((buf, original_size))
             })

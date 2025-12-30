@@ -1,5 +1,6 @@
 use bytesize::MIB;
-use bzip3::stream::{parallel_compress, parallel_decompress};
+use bzip3::stream::{compress, decompress};
+use bzip3::{BlockSize, Error};
 use clap::Parser;
 use std::io::{stdin, stdout, BufReader, BufWriter};
 
@@ -23,15 +24,17 @@ fn main() -> anyhow::Result<()> {
     let block_size_bytes = args.block_size * MIB as usize;
 
     if args.decompress {
-        parallel_decompress(
+        decompress(
             BufReader::new(stdin().lock()),
             BufWriter::new(stdout().lock()),
+            None,
         )?;
     } else {
-        parallel_compress(
+        compress(
             BufReader::new(stdin().lock()),
             BufWriter::new(stdout().lock()),
-            block_size_bytes,
+            BlockSize::new(block_size_bytes as _).ok_or(Error::BlockSize)?,
+            None,
         )?;
     }
     Ok(())

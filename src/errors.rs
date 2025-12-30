@@ -7,7 +7,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     #[error("{0}")]
     Io(#[from] io::Error),
-    #[error("Invalid block size: must be between 65kiB and 511MiB")]
+    #[error("Invalid block size")]
     BlockSize,
     #[error("{0}")]
     ProcessBlock(String),

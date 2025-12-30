@@ -1,12 +1,19 @@
 //! Write-based BZip3 compressor and decompressor.
 
+use std::cmp::min;
 use std::io;
-use std::io::{Cursor, Read, Write};
-
-use byteorder::{ReadBytesExt, WriteBytesExt, LE};
+use std::io::{Read, Write};
 
 use crate::errors::*;
-use crate::{bound, Bz3State, MAGIC_NUMBER};
+use crate::{bound, BlockSize, Bz3State, MAGIC_NUMBER};
+use byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt, LE};
+use static_assertions::const_assert;
+
+#[derive(Eq, PartialEq, Copy, Clone)]
+enum EncoderWritingState {
+    Header,
+    Blocks,
+}
 
 pub struct Bz3Encoder<W>
 where
@@ -14,9 +21,10 @@ where
 {
     writer: W,
     state: Bz3State,
-    buffer: Vec<u8>,
-    buffer_pos: usize,
+    buf: Vec<u8>,
+    buf_pos: usize,
     block_size: usize,
+    write_state: EncoderWritingState,
 }
 
 impl<W> Bz3Encoder<W>
@@ -24,41 +32,53 @@ where
     W: Write,
 {
     /// Creates a new bzip3 stream encoder.
-    ///
-    /// Valid block size is between [`BLOCK_SIZE_MIN`] and [`BLOCK_SIZE_MAX`] bytes.
-    ///
-    /// # Errors
-    ///
-    /// This returns [`Error::BlockSize`] if the block size is invalid.
-    pub fn new(mut writer: W, block_size: usize) -> Result<Self> {
-        let state = Bz3State::new(block_size)?;
+    pub fn new(mut writer: W, block_size: BlockSize) -> Self {
+        let state = Bz3State::new(block_size);
 
-        let mut header = Cursor::new([0_u8; MAGIC_NUMBER.len() + 4 /* i32 */]);
-        header.write_all(MAGIC_NUMBER).unwrap();
-        header.write_i32::<LE>(block_size as i32).unwrap();
-        writer.write_all(header.get_ref())?;
-
-        let buffer_size = bound(block_size);
+        let buffer_size = bound(*block_size as _);
         let buffer = vec![0; buffer_size];
 
-        Ok(Self {
+        Self {
             writer,
             state,
-            buffer,
-            buffer_pos: 0,
-            block_size,
-        })
+            buf: buffer,
+            buf_pos: 0,
+            block_size: *block_size as _,
+            write_state: EncoderWritingState::Header,
+        }
     }
 
     /// Compresses up to a whole block and write to `self.writer`.
-    fn compress_block(&mut self) -> Result<()> {
-        // self.buffer_pos as the size of data available to be compressed
-        let data_size = self.buffer_pos;
-        debug_assert!(data_size <= self.block_size);
-        let new_size = self.state.encode_block(&mut self.buffer, data_size)?;
+    fn compress_block_and_flush(&mut self) -> io::Result<()> {
+        if self.buf_pos == 0 {
+            return Ok(());
+        }
+
+        let data_size = self.buf_pos;
+        let new_size = self
+            .state
+            .encode_block(&mut self.buf, data_size)
+            .map_err(Error::into_io_error)?;
         self.writer.write_i32::<LE>(new_size as i32)?;
         self.writer.write_i32::<LE>(data_size as i32)?;
-        self.writer.write_all(&self.buffer[..new_size])?;
+        self.writer.write_all(&self.buf[..new_size])?;
+
+        self.buf_pos = 0;
+        Ok(())
+    }
+
+    fn finish_header_write(&mut self) -> io::Result<()> {
+        if self.write_state != EncoderWritingState::Header {
+            return Ok(());
+        }
+
+        // Write header
+        let mut header = [0_u8; MAGIC_NUMBER.len() + 4 /* block size */];
+        header[..MAGIC_NUMBER.len()].copy_from_slice(MAGIC_NUMBER);
+        LE::write_i32(&mut header[MAGIC_NUMBER.len()..], self.block_size as _);
+        self.writer.write_all(&header)?;
+
+        self.write_state = EncoderWritingState::Blocks;
         Ok(())
     }
 }
@@ -76,54 +96,60 @@ impl<W> Write for Bz3Encoder<W>
 where
     W: Write,
 {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let mut write_size = buf.len();
-        let remaining_size = self.block_size - self.buffer_pos;
+    fn write(&mut self, mut buf: &[u8]) -> io::Result<usize> {
+        // lazy-write the header
+        self.finish_header_write()?;
 
-        if write_size > remaining_size {
-            write_size = remaining_size;
+        // consume all `buf` data
+        let all_size = buf.len();
+        while !buf.is_empty() {
+            let amount = min(buf.len(), self.block_size - self.buf_pos);
+
+            self.buf[self.buf_pos..(self.buf_pos + amount)].copy_from_slice(&buf[..amount]);
+            self.buf_pos += amount;
+
+            buf = &buf[amount..];
+
+            if self.buf_pos == self.block_size {
+                // Process the whole buffer
+                // here the whole data with block_size is filled and needs to be compressed.
+                self.compress_block_and_flush()?
+            }
         }
 
-        self.buffer[self.buffer_pos..(self.buffer_pos + write_size)]
-            .copy_from_slice(&buf[..write_size]);
-
-        self.buffer_pos += write_size;
-
-        if self.buffer_pos == self.block_size {
-            // process the whole buffer
-            // here the whole data with block_size is filled and needs to be compressed
-            self.compress_block().map_err(Error::into_io_error)?;
-            self.buffer_pos = 0;
-        }
-
-        Ok(write_size)
+        Ok(all_size)
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        if self.buffer_pos != 0 {
-            self.compress_block().map_err(Error::into_io_error)?;
-        }
-        self.buffer_pos = 0;
+        self.finish_header_write()?;
+        self.compress_block_and_flush()?;
+        self.writer.flush()?;
         Ok(())
     }
 }
 
-const BLOCK_HEADER_SIZE: usize = 2 * 4 /* i32 */;
+#[derive(Copy, Clone)]
+enum DecoderReadingState {
+    FileHeader {
+        pos: usize,
+    },
+    BlockHeader {
+        pos: usize,
+    },
+    BlockData {
+        new_size: usize,
+        read_size: usize,
+        pos: usize,
+    },
+}
 
-pub struct Bz3Decoder<W>
-where
-    W: Write,
-{
+pub struct Bz3Decoder<W> {
     writer: W,
     state: Option<Bz3State>,
-    buffer: Vec<u8>,
-    buffer_pos: usize,
-    header_len: usize,
-    block_header_buf: [u8; BLOCK_HEADER_SIZE], /* (i32, i32) */
-    block_header_buf_pos: usize,
-    /// If present, the block header has been read, and this decoder now is waiting
-    /// for reading the block data.
-    block_header: Option<BlockHeader>,
+    buf: Vec<u8>,
+    /// A small space for reading file and block header info.
+    header_tmp: [u8; Bz3Decoder::<()>::MINIMAL_HEADER_BUF],
+    reading_state: DecoderReadingState,
 }
 
 struct BlockHeader {
@@ -142,53 +168,51 @@ impl BlockHeader {
     }
 }
 
+impl<W> Bz3Decoder<W> {
+    const FILE_HEADER_SIZE: usize = MAGIC_NUMBER.len() + 4 /* block_size */;
+    const BLOCK_HEADER_SIZE: usize = 2 * 4 /* new_size and read_size */;
+    const MINIMAL_HEADER_BUF: usize = 9;
+}
+
+const_assert!(Bz3Decoder::<()>::MINIMAL_HEADER_BUF >= Bz3Decoder::<()>::FILE_HEADER_SIZE);
+const_assert!(Bz3Decoder::<()>::MINIMAL_HEADER_BUF >= Bz3Decoder::<()>::BLOCK_HEADER_SIZE);
+
 impl<W> Bz3Decoder<W>
 where
     W: Write,
 {
-    pub fn new(writer: W) -> Self {
-        let header_len = MAGIC_NUMBER.len() + 4 /* i32 */;
+    pub const fn new(writer: W) -> Self {
         Self {
             state: None, /* can't initialize Bz3State; block size hasn't been read */
             writer,
-            buffer: vec![0_u8; header_len], /* a minimum space for reading magic/header first */
-            buffer_pos: 0,
-            header_len,
-            block_header_buf: [0_u8; 8],
-            block_header_buf_pos: 0,
-            block_header: None,
+            buf: Vec::new(),
+            header_tmp: [0_u8; _],
+            reading_state: DecoderReadingState::FileHeader { pos: 0 },
         }
     }
 
-    fn initialize(&mut self) -> Result<()> {
-        let mut cursor = Cursor::new(&mut self.buffer);
-        let mut magic = [0_u8; MAGIC_NUMBER.len()];
-        cursor.read_exact(&mut magic).unwrap();
-        if &magic != MAGIC_NUMBER {
-            return Err(Error::InvalidSignature);
-        }
-        let block_size = cursor.read_i32::<LE>().unwrap() as usize;
-        // reinitialize the buffer
-        let buffer_size = bound(block_size);
-        self.buffer = vec![0_u8; buffer_size];
-        self.state = Some(Bz3State::new(block_size)?);
-        Ok(())
-    }
-
-    fn decompress_block(&mut self) -> Result<()> {
+    fn decompress_block(&mut self, new_size: usize, read_size: usize) -> Result<()> {
         let state = self.state.as_mut();
         let state = state.unwrap();
 
-        let Some(block_header) = &self.block_header else {
-            unreachable!()
-        };
-        state.decode_block(
-            &mut self.buffer,
-            block_header.new_size as _,
-            block_header.read_size as _,
-        )?;
-        self.writer
-            .write_all(&self.buffer[..block_header.read_size as usize])?;
+        state.decode_block(&mut self.buf, new_size as _, read_size as _)?;
+        self.writer.write_all(&self.buf[..read_size])?;
+        Ok(())
+    }
+
+    fn init_bz3_state(&mut self) -> io::Result<()> {
+        if &self.header_tmp[..MAGIC_NUMBER.len()] != MAGIC_NUMBER {
+            return Err(Error::into_io_error(Error::InvalidSignature));
+        }
+        let block_size =
+            LE::read_u32(&self.header_tmp[MAGIC_NUMBER.len()..(MAGIC_NUMBER.len() + 4)]);
+        let state = Bz3State::new(
+            BlockSize::new(block_size)
+                .ok_or(Error::BlockSize)
+                .map_err(Error::into_io_error)?,
+        );
+        self.state = Some(state);
+        self.buf = vec![0_u8; bound(block_size as _)];
         Ok(())
     }
 }
@@ -197,70 +221,67 @@ impl<W> Write for Bz3Decoder<W>
 where
     W: Write,
 {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        if self.state.is_none() {
-            // wait for the bzip3 header to initialize the decoder
-            let mut write_size = buf.len();
-            let needed_size = self.header_len - self.buffer_pos;
-            if write_size > needed_size {
-                write_size = needed_size;
+    fn write(&mut self, mut buf: &[u8]) -> io::Result<usize> {
+        let all_in = buf.len();
+
+        // consume all
+        while !buf.is_empty() {
+            match self.reading_state {
+                DecoderReadingState::FileHeader { ref mut pos } => {
+                    let amount = min(buf.len(), Self::FILE_HEADER_SIZE - *pos);
+                    self.header_tmp[*pos..(*pos + amount)].copy_from_slice(&buf[..amount]);
+                    *pos += amount;
+                    buf = &buf[amount..];
+
+                    if *pos == Self::FILE_HEADER_SIZE {
+                        self.init_bz3_state()?;
+                        self.reading_state = DecoderReadingState::BlockHeader { pos: 0 };
+                    }
+                }
+
+                DecoderReadingState::BlockHeader { ref mut pos } => {
+                    let amount = min(buf.len(), Self::BLOCK_HEADER_SIZE - *pos);
+                    self.header_tmp[*pos..(*pos + amount)].copy_from_slice(&buf[..amount]);
+                    *pos += amount;
+                    buf = &buf[amount..];
+
+                    if *pos == Self::BLOCK_HEADER_SIZE {
+                        let new_size = LE::read_i32(&self.header_tmp[0..4]);
+                        let read_size = LE::read_i32(&self.header_tmp[4..8]);
+                        self.reading_state = DecoderReadingState::BlockData {
+                            new_size: new_size as _,
+                            read_size: read_size as _,
+                            pos: 0,
+                        };
+                    }
+                }
+
+                DecoderReadingState::BlockData {
+                    read_size,
+                    new_size,
+                    ref mut pos,
+                } => {
+                    let amount = min(buf.len(), new_size - *pos);
+                    self.buf[*pos..(*pos + amount)].copy_from_slice(&buf[..amount]);
+                    *pos += amount;
+                    buf = &buf[amount..];
+
+                    if *pos == new_size {
+                        // decompress a block
+                        self.decompress_block(new_size, read_size)
+                            .map_err(Error::into_io_error)?;
+
+                        // prepare to read the next block
+                        self.reading_state = DecoderReadingState::BlockHeader { pos: 0 }
+                    }
+                }
             }
-            self.buffer[self.buffer_pos..(self.buffer_pos + write_size)]
-                .copy_from_slice(&buf[..write_size]);
-            self.buffer_pos += write_size;
-            if self.buffer_pos == self.header_len {
-                // header prepared
-                self.initialize().map_err(Error::into_io_error)?;
-                self.buffer_pos = 0;
-            }
-            return Ok(write_size);
         }
 
-        if self.block_header.is_none() {
-            // wait for the block header
-            let mut write_size = buf.len();
-            let needed_size = BLOCK_HEADER_SIZE - self.block_header_buf_pos;
-            if write_size > needed_size {
-                write_size = needed_size;
-            }
-            self.block_header_buf
-                [self.block_header_buf_pos..(self.block_header_buf_pos + write_size)]
-                .copy_from_slice(&buf[..write_size]);
-
-            self.block_header_buf_pos += write_size;
-            if self.block_header_buf_pos == BLOCK_HEADER_SIZE {
-                // resolve block header
-                let mut cursor = Cursor::new(&self.block_header_buf);
-                let block_header = BlockHeader::read_from(&mut cursor)?;
-                self.block_header = Some(block_header);
-                self.block_header_buf_pos = 0;
-            }
-            Ok(write_size)
-        } else {
-            // wait for the block data
-            let block_header = self.block_header.as_ref().unwrap();
-            let needed_size = block_header.new_size as usize - self.buffer_pos;
-            let mut write_size = buf.len();
-            if write_size > needed_size {
-                write_size = needed_size;
-            }
-            self.buffer[self.buffer_pos..(self.buffer_pos + write_size)]
-                .copy_from_slice(&buf[..write_size]);
-            self.buffer_pos += write_size;
-            if self.buffer_pos == block_header.new_size as usize {
-                self.decompress_block().map_err(Error::into_io_error)?;
-                // reset block header, wait for the next block's header
-                self.block_header = None;
-                self.buffer_pos = 0;
-            }
-            Ok(write_size)
-        }
+        Ok(all_in)
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        // this call seems to be not such meaningful
-        // because in `write()`, when the block buffer is filled,
-        // it immediately decompresses the block and writes to `self.reader`
-        Ok(())
+        self.writer.flush()
     }
 }
