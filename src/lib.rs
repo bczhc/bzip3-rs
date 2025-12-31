@@ -17,12 +17,15 @@
 //!
 //! # Examples
 //!
+//! ## Use read/write-based wrapper
+//!
 //! ```
 //! use std::io::Read;
+//! use bzip3::BlockSize;
 //! use bzip3::read::{Bz3Decoder, Bz3Encoder};
 //!
 //! let data = "hello, world".as_bytes();
-//! let block_size = 100 * 1024; // 100 kiB
+//! let block_size = BlockSize::kib(100).unwrap();
 //!
 //! let mut compressor = Bz3Encoder::new(data, block_size).unwrap();
 //! let mut decompressor = Bz3Decoder::new(&mut compressor).unwrap();
@@ -30,6 +33,18 @@
 //! let mut contents = String::new();
 //! decompressor.read_to_string(&mut contents).unwrap();
 //! assert_eq!(contents, "hello, world");
+//! ```
+//!
+//! ## Use stream processor
+//!
+//! ```no_run
+//! use std::io::{stdin, stdout};
+//! use bzip3::{stream, BlockSize};
+//!
+//! let reader = stdin().lock();
+//! let writer = stdout().lock();
+//!
+//! stream::compress(reader, writer, BlockSize::DEFAULT, Some(8 /* 8 threads */)).unwrap();
 //! ```
 extern crate core;
 
