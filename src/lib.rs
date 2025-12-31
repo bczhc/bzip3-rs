@@ -33,10 +33,11 @@
 //! ```
 extern crate core;
 
+use byteorder::{ByteOrder, LE};
 use bytesize::{KIB, MIB};
 use libbzip3_sys::{
     bz3_bound, bz3_decode_block, bz3_encode_block, bz3_free, bz3_new, bz3_state, bz3_strerror,
-    BZ3_ERR_DATA_SIZE_TOO_SMALL, BZ3_OK,
+    BZ3_ERR_DATA_SIZE_TOO_SMALL,
 };
 use std::io::ErrorKind;
 use std::ops::Deref;
@@ -77,6 +78,9 @@ impl BlockSize {
 
     /// Maximum block size.
     pub const MAX: Self = Self(BLOCK_SIZE_MAX);
+
+    /// Default block size used in bzip3 CLI
+    pub const DEFAULT: Self = Self(16 * MIB as u32);
 
     const fn bytes(size: u32) -> Option<Self> {
         if !matches!(size, BLOCK_SIZE_MIN..=BLOCK_SIZE_MAX) {
@@ -257,8 +261,32 @@ impl Drop for Bz3State {
 
 unsafe impl Send for Bz3State {}
 
+#[derive(Copy, Clone)]
+pub struct BlockHeader {
+    pub new_size: usize,
+    pub read_size: usize,
+}
+
+impl BlockHeader {
+    fn read_from_slice(value: &[u8]) -> Self {
+        let new_size = LE::read_i32(&value[..4]);
+        let read_size = LE::read_i32(&value[4..8]);
+        Self {
+            new_size: new_size as _,
+            read_size: read_size as _,
+        }
+    }
+
+    pub fn to_bytes(self) -> [u8; 8] {
+        let mut buf = [0_u8; 8];
+        LE::write_i32(&mut buf[..4], self.new_size as _);
+        LE::write_i32(&mut buf[4..8], self.read_size as _);
+        buf
+    }
+}
+
 #[cfg(test)]
-mod test {
+pub mod test {
     use crate as bzip3;
     use crate::{bound, BlockSize, Bz3State};
     use regex::Regex;

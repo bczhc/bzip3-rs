@@ -13,6 +13,10 @@ use bzip3::{read, write, BlockSize, BLOCK_SIZE_MAX, BLOCK_SIZE_MIN, MAGIC_NUMBER
 
 const KB: usize = 1024;
 
+pub const HEADER_BS16MIB: &[u8; 9] = b"BZ3v1\0\0\0\x01";
+
+pub const EMPTY_DATA_BLOCK: [u8; 16] = hex!("0800 0000 0000 0000 0100 0000 ffff ffff");
+
 #[test]
 fn test_compress_and_decompress() {
     let test_size_array = [
@@ -157,10 +161,8 @@ fn avoid_creating_empty_blocks_by_flush_calls() {
     encoder.flush().unwrap();
     encoder.write_all(b"hello").unwrap();
     drop(encoder);
-    assert_eq!(find_subsequence(&buf, &EMPTY_BLOCK), None);
+    assert_eq!(find_subsequence(&buf, &EMPTY_DATA_BLOCK), None);
 }
-
-const EMPTY_BLOCK: [u8; 16] = hex!("0800 0000 0000 0000 0100 0000 ffff ffff");
 
 #[test]
 fn decode_empty_blocks() {
@@ -170,10 +172,10 @@ fn decode_empty_blocks() {
     archive.write_all(MAGIC_NUMBER).unwrap();
     archive.write_all(&block_size).unwrap();
     for _ in 0..10 {
-        archive.write_all(&EMPTY_BLOCK).unwrap();
+        archive.write_all(&EMPTY_DATA_BLOCK).unwrap();
     }
     archive.write_all(&data_block).unwrap();
-    archive.write_all(&EMPTY_BLOCK).unwrap();
+    archive.write_all(&EMPTY_DATA_BLOCK).unwrap();
     archive.write_all(&data_block).unwrap();
 
     // read-based
@@ -184,6 +186,7 @@ fn decode_empty_blocks() {
     let mut writer = Cursor::new(Vec::new());
     let mut decoder = write::Bz3Decoder::new(&mut writer);
     io::copy(&mut Cursor::new(archive), &mut decoder).unwrap();
+    drop(decoder);
     assert_eq!(
         String::from_utf8(writer.into_inner()).unwrap(),
         "hellohello"
@@ -448,4 +451,79 @@ fn test_parallel_large() {
         original_data, decompressed_buffer,
         "Data corruption in parallel round trip"
     );
+}
+
+mod write_based {
+    use crate::{write, BlockSize, EMPTY_DATA_BLOCK, HEADER_BS16MIB};
+    use std::io::Write;
+
+    #[test]
+    fn encoder_write_header_on_finish() {
+        let mut buf: Vec<u8> = Vec::new();
+        let e = write::Bz3Encoder::new(&mut buf, BlockSize::DEFAULT);
+        drop(e);
+        assert_eq!(buf, HEADER_BS16MIB);
+
+        let mut buf = Vec::new();
+        let mut e = write::Bz3Encoder::new(&mut buf, BlockSize::DEFAULT);
+        e.write_all(b"aaa").unwrap();
+        e.write_all(b"bbb").unwrap();
+        drop(e);
+        assert_eq!(&buf[..HEADER_BS16MIB.len()], HEADER_BS16MIB);
+    }
+
+    #[test]
+    fn decoder_detect_incomplete_data() {
+        let mut buf = Vec::new();
+        let d = write::Bz3Decoder::new(&mut buf);
+        assert_eq!(
+            format!("{}", d.finish().err().unwrap()),
+            "Insufficient data to read for file header"
+        );
+
+        let mut buf = Vec::new();
+        let mut d = write::Bz3Decoder::new(&mut buf);
+        d.write_all(HEADER_BS16MIB).unwrap();
+        assert!(d.finish().is_ok());
+
+        let mut buf = Vec::new();
+        let mut d = write::Bz3Decoder::new(&mut buf);
+        d.write_all(HEADER_BS16MIB).unwrap();
+        d.write_all(
+            &EMPTY_DATA_BLOCK[..5], /* insufficient block header data*/
+        )
+        .unwrap();
+        assert_eq!(
+            format!("{}", d.finish().err().unwrap()),
+            "Insufficient data to read for block header"
+        );
+
+        let mut buf = Vec::new();
+        let mut d = write::Bz3Decoder::new(&mut buf);
+        d.write_all(HEADER_BS16MIB).unwrap();
+        d.write_all(&EMPTY_DATA_BLOCK[..8]).unwrap();
+        assert_eq!(
+            format!("{}", d.finish().err().unwrap()),
+            "Insufficient data to decode a full block"
+        );
+
+        let mut buf = Vec::new();
+        let mut d = write::Bz3Decoder::new(&mut buf);
+        d.write_all(HEADER_BS16MIB).unwrap();
+        d.write_all(
+            &EMPTY_DATA_BLOCK[..10], /* full block header + truncated compressed data */
+        )
+        .unwrap();
+        assert_eq!(
+            format!("{}", d.finish().err().unwrap()),
+            "Insufficient data to decode a full block"
+        );
+
+        let mut buf = Vec::new();
+        let mut d = write::Bz3Decoder::new(&mut buf);
+        d.write_all(HEADER_BS16MIB).unwrap();
+        // a full block
+        d.write_all(&EMPTY_DATA_BLOCK).unwrap();
+        assert!(d.finish().is_ok());
+    }
 }

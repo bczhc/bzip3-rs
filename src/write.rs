@@ -2,11 +2,11 @@
 
 use std::cmp::min;
 use std::io;
-use std::io::{Read, Write};
+use std::io::Write;
 
 use crate::errors::*;
-use crate::{bound, BlockSize, Bz3State, MAGIC_NUMBER};
-use byteorder::{ByteOrder, ReadBytesExt, WriteBytesExt, LE};
+use crate::{bound, BlockHeader, BlockSize, Bz3State, MAGIC_NUMBER};
+use byteorder::{ByteOrder, WriteBytesExt, LE};
 use static_assertions::const_assert;
 
 #[derive(Eq, PartialEq, Copy, Clone)]
@@ -130,52 +130,26 @@ where
 
 #[derive(Copy, Clone)]
 enum DecoderReadingState {
-    FileHeader {
-        pos: usize,
-    },
-    BlockHeader {
-        pos: usize,
-    },
-    BlockData {
-        new_size: usize,
-        read_size: usize,
-        pos: usize,
-    },
+    FileHeader { pos: usize },
+    BlockHeader { pos: usize },
+    BlockData { header: BlockHeader, pos: usize },
 }
 
-pub struct Bz3Decoder<W> {
+pub struct Bz3Decoder<W: Write> {
     writer: W,
     state: Option<Bz3State>,
     buf: Vec<u8>,
     /// A small space for reading file and block header info.
-    header_tmp: [u8; Bz3Decoder::<()>::MINIMAL_HEADER_BUF],
+    header_tmp: [u8; DECODER_MINIMAL_HEADER_BUF],
     reading_state: DecoderReadingState,
 }
 
-struct BlockHeader {
-    new_size: i32,
-    read_size: i32,
-}
+const DECODER_FILE_HEADER_SIZE: usize = MAGIC_NUMBER.len() + 4 /* block_size */;
+const DECODER_BLOCK_HEADER_SIZE: usize = 2 * 4 /* new_size and read_size */;
+const DECODER_MINIMAL_HEADER_BUF: usize = 9;
 
-impl BlockHeader {
-    fn read_from<R: Read>(reader: &mut R) -> io::Result<Self> {
-        let new_size = reader.read_i32::<LE>()?;
-        let read_size = reader.read_i32::<LE>()?;
-        Ok(Self {
-            new_size,
-            read_size,
-        })
-    }
-}
-
-impl<W> Bz3Decoder<W> {
-    const FILE_HEADER_SIZE: usize = MAGIC_NUMBER.len() + 4 /* block_size */;
-    const BLOCK_HEADER_SIZE: usize = 2 * 4 /* new_size and read_size */;
-    const MINIMAL_HEADER_BUF: usize = 9;
-}
-
-const_assert!(Bz3Decoder::<()>::MINIMAL_HEADER_BUF >= Bz3Decoder::<()>::FILE_HEADER_SIZE);
-const_assert!(Bz3Decoder::<()>::MINIMAL_HEADER_BUF >= Bz3Decoder::<()>::BLOCK_HEADER_SIZE);
+const_assert!(DECODER_MINIMAL_HEADER_BUF >= DECODER_FILE_HEADER_SIZE);
+const_assert!(DECODER_MINIMAL_HEADER_BUF >= DECODER_BLOCK_HEADER_SIZE);
 
 impl<W> Bz3Decoder<W>
 where
@@ -228,37 +202,37 @@ where
         while !buf.is_empty() {
             match self.reading_state {
                 DecoderReadingState::FileHeader { ref mut pos } => {
-                    let amount = min(buf.len(), Self::FILE_HEADER_SIZE - *pos);
+                    let amount = min(buf.len(), DECODER_FILE_HEADER_SIZE - *pos);
                     self.header_tmp[*pos..(*pos + amount)].copy_from_slice(&buf[..amount]);
                     *pos += amount;
                     buf = &buf[amount..];
 
-                    if *pos == Self::FILE_HEADER_SIZE {
+                    if *pos == DECODER_FILE_HEADER_SIZE {
                         self.init_bz3_state()?;
                         self.reading_state = DecoderReadingState::BlockHeader { pos: 0 };
                     }
                 }
 
                 DecoderReadingState::BlockHeader { ref mut pos } => {
-                    let amount = min(buf.len(), Self::BLOCK_HEADER_SIZE - *pos);
+                    let amount = min(buf.len(), DECODER_BLOCK_HEADER_SIZE - *pos);
                     self.header_tmp[*pos..(*pos + amount)].copy_from_slice(&buf[..amount]);
                     *pos += amount;
                     buf = &buf[amount..];
 
-                    if *pos == Self::BLOCK_HEADER_SIZE {
-                        let new_size = LE::read_i32(&self.header_tmp[0..4]);
-                        let read_size = LE::read_i32(&self.header_tmp[4..8]);
+                    if *pos == DECODER_BLOCK_HEADER_SIZE {
                         self.reading_state = DecoderReadingState::BlockData {
-                            new_size: new_size as _,
-                            read_size: read_size as _,
+                            header: BlockHeader::read_from_slice(&self.header_tmp[..]),
                             pos: 0,
                         };
                     }
                 }
 
                 DecoderReadingState::BlockData {
-                    read_size,
-                    new_size,
+                    header:
+                        BlockHeader {
+                            new_size,
+                            read_size,
+                        },
                     ref mut pos,
                 } => {
                     let amount = min(buf.len(), new_size - *pos);
@@ -283,5 +257,46 @@ where
 
     fn flush(&mut self) -> io::Result<()> {
         self.writer.flush()
+    }
+}
+
+impl<W: Write> Bz3Decoder<W> {
+    /// Finish the decoder.
+    ///
+    /// It's better to finish the decoder by this call, which flushes the data and provides
+    /// insufficient data detection. Though it's also just fine to simply drop(the object),
+    /// but will ignore the data which doesn't trigger a new block decompression. In this
+    /// case, the decompressed data stream is considered truncated, and we can't notice this if
+    /// only using a drop call.
+    pub fn finish(mut self) -> io::Result<()> {
+        match self.reading_state {
+            DecoderReadingState::FileHeader { .. } => {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "Insufficient data to read for file header",
+                ));
+            }
+            DecoderReadingState::BlockData { .. } => {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "Insufficient data to decode a full block",
+                ));
+            }
+            DecoderReadingState::BlockHeader { pos: x } if x != 0 => {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "Insufficient data to read for block header",
+                ))
+            }
+            _ => {}
+        }
+        self.flush()?;
+        Ok(())
+    }
+}
+
+impl<W: Write> Drop for Bz3Decoder<W> {
+    fn drop(&mut self) {
+        let _r = self.flush();
     }
 }
